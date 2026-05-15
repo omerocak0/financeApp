@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput,
-  TouchableOpacity, StatusBar, Dimensions, Modal, Platform,
+  TouchableOpacity, StatusBar, Dimensions, Modal, Platform, Linking
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import { WebView } from 'react-native-webview';
 import { RENKLER } from '../sabitler/renkler';
 import { VARSAYILAN_HISSELER, hisseAra, HisseSenedi } from '../veriler/hisseVerileri';
 import CizgiGrafik from '../bilesenler/CizgiGrafik';
@@ -50,6 +51,73 @@ const SatirItem = ({ etiket, deger }: { etiket: string; deger: string }) => (
   </View>
 );
 
+type Haber = {
+  id: string;
+  baslik: string;
+  ozet: string;
+  kaynak: string;
+  tarih: string;
+  icerik: string;
+  link?: string;
+};
+
+const HaberleriSüzVeGetir = async (hisseAdi: string, sembol: string): Promise<Haber[]> => {
+  try {
+    const aramaMetni = encodeURIComponent(`${sembol} hisse`);
+    const res = await fetch(`https://news.google.com/rss/search?q=${aramaMetni}&hl=tr&gl=TR&ceid=TR:tr`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+    
+    if (!res.ok) throw new Error('API Hatası');
+    
+    const text = await res.text();
+    const items = text.split('<item>').slice(1);
+    
+    if (items.length > 0) {
+      return items.slice(0, 5).map((item, index) => {
+        const baslikMatch = item.match(/<title>(.*?)<\/title>/);
+        const linkMatch = item.match(/<link>(.*?)<\/link>/);
+        const kaynakMatch = item.match(/<source[^>]*>(.*?)<\/source>/);
+        const pubDateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/);
+        
+        let baslik = baslikMatch ? baslikMatch[1] : 'Haber';
+        baslik = baslik.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        
+        let tarihStr = 'Güncel';
+        if (pubDateMatch) {
+           const d = new Date(pubDateMatch[1]);
+           if (!isNaN(d.getTime())) {
+             tarihStr = d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+           }
+        }
+
+        return {
+          id: String(index),
+          baslik: baslik,
+          ozet: 'Haberin tam metnini okumak için tıklayın.',
+          kaynak: kaynakMatch ? kaynakMatch[1] : 'Google Haberler',
+          tarih: tarihStr,
+          icerik: '',
+          link: linkMatch ? linkMatch[1] : ''
+        };
+      });
+    }
+    return [];
+  } catch (error) {
+    console.error("Haber çekme hatası:", error);
+    return [];
+  }
+};
+
+const HaberKartıBileşeni = ({ haber, onPress }: { haber: Haber, onPress?: () => void }) => (
+  <TouchableOpacity style={st.haberKart} onPress={onPress} activeOpacity={0.7}>
+    <Text style={st.haberKaynakVeTarih}>{haber.kaynak} • {haber.tarih}</Text>
+    <Text style={st.haberBaslik} numberOfLines={2}>{haber.baslik}</Text>
+  </TouchableOpacity>
+);
+
 const FinansEkrani: React.FC = () => {
   const [arama, setArama]       = useState('');
   const [sec, setSec]           = useState<HisseSenedi>(VARSAYILAN_HISSELER[0]);
@@ -57,6 +125,28 @@ const FinansEkrani: React.FC = () => {
   const [dilim, setDilim]       = useState<Dilim>('1A');
   const [zoom, setZoom]         = useState(1);
   const [modalAcik, setModal]   = useState(false);
+
+  const [seciliHisseAdi, setSeciliHisseAdi] = useState(sec.sirketAdi);
+  const [haberYukleniyorMu, setHaberYukleniyorMu] = useState(false);
+  const [guncelHaberListesi, setGuncelHaberListesi] = useState<Haber[]>([]);
+  const [seciliHaber, setSeciliHaber] = useState<Haber | null>(null);
+
+  const TurkceHaberleriYukle = async (sirketAdi: string, sembol: string) => {
+    setHaberYukleniyorMu(true);
+    try {
+      const haberler = await HaberleriSüzVeGetir(sirketAdi, sembol);
+      setGuncelHaberListesi(haberler);
+    } catch (error) {
+      setGuncelHaberListesi([]);
+    } finally {
+      setHaberYukleniyorMu(false);
+    }
+  };
+
+  useEffect(() => {
+    setSeciliHisseAdi(sec.sirketAdi);
+    TurkceHaberleriYukle(sec.sirketAdi, sec.sembol);
+  }, [sec.sirketAdi, sec.sembol]);
 
   const liste = useMemo(() => arama.trim() ? hisseAra(arama) : VARSAYILAN_HISSELER, [arama]);
 
@@ -225,6 +315,26 @@ const FinansEkrani: React.FC = () => {
             );
           })}
         </View>
+
+        {/* Son Gelişmeler & Haberler */}
+        <View style={st.kart}>
+          <Text style={st.kartBaslik}>Son Gelişmeler & Haberler</Text>
+          <View style={{ height: 1, backgroundColor: RENKLER.sinir, marginVertical: 10 }} />
+          {haberYukleniyorMu ? (
+            <Text style={{ color: RENKLER.metinIkincil, textAlign: 'center', marginVertical: 20 }}>
+              Haber kaynağı yükleniyor...
+            </Text>
+          ) : guncelHaberListesi.length > 0 ? (
+            <View style={{ gap: 10 }}>
+              {guncelHaberListesi.map(h => <HaberKartıBileşeni key={h.id} haber={h} onPress={() => setSeciliHaber(h)} />)}
+            </View>
+          ) : (
+            <Text style={{ color: RENKLER.metinIkincil, textAlign: 'center', marginVertical: 20 }}>
+              Bu hisse hakkında güncel haber bulunamadı.
+            </Text>
+          )}
+        </View>
+
         </View>
       </ScrollView>
 
@@ -248,6 +358,45 @@ const FinansEkrani: React.FC = () => {
             </ScrollView>
             <ZoomKontrol />
             <Grafik w={SW - 32} h={SH * 0.45} />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Haber Detay Modalı */}
+      <Modal visible={seciliHaber !== null} animationType="slide" transparent>
+        <View style={st.modalArka}>
+          <View style={[st.modalKart, { flex: 1, marginTop: Platform.OS === 'ios' ? 50 : 20, paddingBottom: 0 }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={{ color: RENKLER.metinIkincil, fontWeight: '600', fontSize: 13, flex: 1, marginRight: 10 }} numberOfLines={1}>
+                {seciliHaber?.kaynak} • {seciliHaber?.tarih}
+              </Text>
+              <TouchableOpacity onPress={() => setSeciliHaber(null)} style={st.kapatBtn}>
+                <Text style={{ color: RENKLER.metin, fontSize: 16 }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ flex: 1, borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden', backgroundColor: RENKLER.arkaplan }}>
+              {seciliHaber?.link ? (
+                <WebView 
+                  source={{ uri: seciliHaber.link }} 
+                  style={{ flex: 1, backgroundColor: 'transparent' }} 
+                  showsVerticalScrollIndicator={false}
+                  startInLoadingState={true}
+                  injectedJavaScript={`
+                    (function() {
+                      if (document.getElementById('karanlik-tema-enjekt')) return;
+                      var css = 'html { filter: invert(100%) hue-rotate(180deg) !important; background: #121212 !important; } ' +
+                                'body { background: #121212 !important; } ' +
+                                'img, video, iframe, svg, canvas, picture, [style*="background-image"] { filter: invert(100%) hue-rotate(180deg) !important; }';
+                      var style = document.createElement('style');
+                      style.id = 'karanlik-tema-enjekt';
+                      style.appendChild(document.createTextNode(css));
+                      document.head.appendChild(style);
+                    })();
+                    true;
+                  `}
+                />
+              ) : null}
+            </View>
           </View>
         </View>
       </Modal>
@@ -299,6 +448,10 @@ const st = StyleSheet.create({
   modalArka:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
   modalKart:   { backgroundColor: RENKLER.kartBir, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, borderTopWidth: 1, borderColor: RENKLER.sinir },
   kapatBtn:    { width: 30, height: 30, borderRadius: 15, backgroundColor: RENKLER.kartIki, alignItems: 'center', justifyContent: 'center' },
+  haberKart:   { backgroundColor: RENKLER.kartIki, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: RENKLER.sinir, overflow: 'hidden' },
+  haberKaynakVeTarih: { fontSize: 11, color: RENKLER.metinUcuncul, marginBottom: 4, fontWeight: '600' },
+  haberBaslik: { fontSize: 14, fontWeight: '700', color: RENKLER.metin, marginBottom: 4 },
+  haberOzet:   { fontSize: 12, color: RENKLER.metinIkincil, lineHeight: 18 },
 });
 
 export default FinansEkrani;
