@@ -10,6 +10,8 @@ import { VARSAYILAN_HISSELER, hisseAra, HisseSenedi } from '../veriler/hisseVeri
 import CizgiGrafik from '../bilesenler/CizgiGrafik';
 import MumGrafik from '../bilesenler/MumGrafik';
 import { BilgiIkonu } from '../bilesenler/BilgiIkonu';
+import HaberAnalizKarti from '../bilesenler/HaberAnalizKarti';
+import { API_URL } from '../sabitler/api';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const YATAY_PAD = 12;
@@ -119,11 +121,45 @@ const HaberleriSüzVeGetir = async (hisseAdi: string, sembol: string): Promise<H
   }
 };
 
-const HaberKartıBileşeni = ({ haber, onPress }: { haber: Haber, onPress?: () => void }) => (
-  <TouchableOpacity style={st.haberKart} onPress={onPress} activeOpacity={0.7}>
-    <Text style={st.haberKaynakVeTarih}>{haber.kaynak} • {haber.tarih}</Text>
-    <Text style={st.haberBaslik} numberOfLines={2}>{haber.baslik}</Text>
-  </TouchableOpacity>
+const HaberKartıBileşeni = ({
+  haber,
+  onPress,
+  onAI,
+  onKapat,
+  aiAnalizi,
+  aiYukleniyor,
+}: {
+  haber: Haber;
+  onPress?: () => void;
+  onAI?: () => void;
+  onKapat?: () => void;
+  aiAnalizi?: any;
+  aiYukleniyor?: boolean;
+}) => (
+  <View>
+    <TouchableOpacity style={st.haberKart} onPress={onPress} activeOpacity={0.7}>
+      <View style={{ flex: 1, marginRight: 10 }}>
+        <Text style={st.haberKaynakVeTarih}>{haber.kaynak} • {haber.tarih}</Text>
+        <Text style={st.haberBaslik} numberOfLines={2}>{haber.baslik}</Text>
+      </View>
+      <TouchableOpacity
+        style={[st.aiButon, aiAnalizi && { backgroundColor: '#7e57c244' }]}
+        onPress={aiAnalizi ? onKapat : onAI}
+      >
+        <Text style={st.aiButonMetin}>{aiAnalizi ? '✕ Kapat' : '🛡️ AI'}</Text>
+      </TouchableOpacity>
+    </TouchableOpacity>
+    {aiYukleniyor && (
+      <View style={st.analizYukleniyor}>
+        <Text style={st.analizYukleniyorMetin}>🛡️ Güvenlik analizi yapılıyor...</Text>
+      </View>
+    )}
+    {aiAnalizi && (
+      <View style={{ position: 'relative' }}>
+        <HaberAnalizKarti baslik={haber.baslik} analiz={aiAnalizi} />
+      </View>
+    )}
+  </View>
 );
 
 const FinansEkrani: React.FC = () => {
@@ -141,6 +177,18 @@ const FinansEkrani: React.FC = () => {
   const [haberYukleniyorMu, setHaberYukleniyorMu] = useState(false);
   const [guncelHaberListesi, setGuncelHaberListesi] = useState<Haber[]>([]);
   const [seciliHaber, setSeciliHaber] = useState<Haber | null>(null);
+  
+  const [aiAnalizleri, setAiAnalizleri] = useState<Record<string, any>>({});
+  const [aiYukleniyor, setAiYukleniyor] = useState<string | null>(null);
+  const [gosterilenHaberSayisi, setGosterilenHaberSayisi] = useState(5);
+
+  const analiziKapat = (haberId: string) => {
+    setAiAnalizleri(prev => {
+      const yeni = { ...prev };
+      delete yeni[haberId];
+      return yeni;
+    });
+  };
 
   const TurkceHaberleriYukle = async (sirketAdi: string, sembol: string) => {
     setHaberYukleniyorMu(true);
@@ -151,6 +199,24 @@ const FinansEkrani: React.FC = () => {
       setGuncelHaberListesi([]);
     } finally {
       setHaberYukleniyorMu(false);
+    }
+  };
+
+  const haberiAnalizEt = async (haber: Haber) => {
+    if (aiYukleniyor) return;
+    setAiYukleniyor(haber.id);
+    try {
+      const res = await fetch(`${API_URL}/analiz?haber_metni=` + encodeURIComponent(haber.baslik + " " + haber.ozet), {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error('Sunucu hatası');
+      const data = await res.json();
+      setAiAnalizleri(prev => ({ ...prev, [haber.id]: data }));
+    } catch (error) {
+      console.error("AI Analiz Hatası:", error);
+      alert("Yapay zeka sunucusuna bağlanılamadı.");
+    } finally {
+      setAiYukleniyor(null);
     }
   };
 
@@ -446,7 +512,25 @@ const FinansEkrani: React.FC = () => {
               </Text>
             ) : guncelHaberListesi.length > 0 ? (
               <View style={{ gap: 10 }}>
-                {guncelHaberListesi.map(h => <HaberKartıBileşeni key={h.id} haber={h} onPress={() => setSeciliHaber(h)} />)}
+                {guncelHaberListesi.slice(0, gosterilenHaberSayisi).map(h => (
+                  <HaberKartıBileşeni
+                    key={h.id}
+                    haber={h}
+                    onPress={() => setSeciliHaber(h)}
+                    onAI={() => haberiAnalizEt(h)}
+                    onKapat={() => analiziKapat(h.id)}
+                    aiAnalizi={aiAnalizleri[h.id]}
+                    aiYukleniyor={aiYukleniyor === h.id}
+                  />
+                ))}
+                {gosterilenHaberSayisi < guncelHaberListesi.length && (
+                  <TouchableOpacity
+                    style={st.dahaFazlaBtn}
+                    onPress={() => setGosterilenHaberSayisi(prev => prev + 3)}
+                  >
+                    <Text style={st.dahaFazlaBtnMetin}>▼  Daha Fazla Haber</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
               <Text style={{ color: RENKLER.metinIkincil, textAlign: 'center', marginVertical: 20 }}>
@@ -568,10 +652,17 @@ const st = StyleSheet.create({
   modalArka: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
   modalKart: { backgroundColor: RENKLER.kartBir, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, borderTopWidth: 1, borderColor: RENKLER.sinir },
   kapatBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: RENKLER.kartIki, alignItems: 'center', justifyContent: 'center' },
-  haberKart: { backgroundColor: RENKLER.kartIki, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: RENKLER.sinir, overflow: 'hidden' },
+  haberKart: { backgroundColor: RENKLER.kartIki, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: RENKLER.sinir, overflow: 'hidden', flexDirection: 'row', alignItems: 'center' },
   haberKaynakVeTarih: { fontSize: 11, color: RENKLER.metinUcuncul, marginBottom: 4, fontWeight: '600' },
   haberBaslik: { fontSize: 14, fontWeight: '700', color: RENKLER.metin, marginBottom: 4 },
   haberOzet: { fontSize: 12, color: RENKLER.metinIkincil, lineHeight: 18 },
+  aiButon: { backgroundColor: '#7e57c222', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#7e57c255' },
+  aiButonMetin: { color: '#7e57c2', fontSize: 11, fontWeight: '900' },
+  analizKart: { },
+  analizYukleniyor: { backgroundColor: '#7e57c210', borderRadius: 8, padding: 12, marginTop: 6, borderWidth: 1, borderColor: '#7e57c244' },
+  analizYukleniyorMetin: { color: '#7e57c2', fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  dahaFazlaBtn: { backgroundColor: RENKLER.kartIki, borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: RENKLER.sinir, marginTop: 4 },
+  dahaFazlaBtnMetin: { color: RENKLER.metinIkincil, fontSize: 13, fontWeight: '700' },
 });
 
 export default FinansEkrani;
