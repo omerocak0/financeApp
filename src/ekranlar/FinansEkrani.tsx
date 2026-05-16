@@ -86,7 +86,7 @@ const HaberleriSüzVeGetir = async (hisseAdi: string, sembol: string): Promise<H
     const items = text.split('<item>').slice(1);
 
     if (items.length > 0) {
-      return items.slice(0, 5).map((item, index) => {
+      return items.slice(0, 15).map((item, index) => {
         const baslikMatch = item.match(/<title>(.*?)<\/title>/);
         const linkMatch = item.match(/<link>(.*?)<\/link>/);
         const kaynakMatch = item.match(/<source[^>]*>(.*?)<\/source>/);
@@ -180,7 +180,7 @@ const FinansEkrani: React.FC = () => {
   
   const [aiAnalizleri, setAiAnalizleri] = useState<Record<string, any>>({});
   const [aiYukleniyor, setAiYukleniyor] = useState<string | null>(null);
-  const [gosterilenHaberSayisi, setGosterilenHaberSayisi] = useState(5);
+  const [gosterilenHaberSayisi, setGosterilenHaberSayisi] = useState(3);
 
   const analiziKapat = (haberId: string) => {
     setAiAnalizleri(prev => {
@@ -383,7 +383,7 @@ const FinansEkrani: React.FC = () => {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 140 : 120 }}>
+        contentContainerStyle={{ paddingBottom: 20 }}>
 
         {/* Yatay hisse listesi — içerikle birlikte kayar */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
@@ -523,14 +523,6 @@ const FinansEkrani: React.FC = () => {
                     aiYukleniyor={aiYukleniyor === h.id}
                   />
                 ))}
-                {gosterilenHaberSayisi < guncelHaberListesi.length && (
-                  <TouchableOpacity
-                    style={st.dahaFazlaBtn}
-                    onPress={() => setGosterilenHaberSayisi(prev => prev + 3)}
-                  >
-                    <Text style={st.dahaFazlaBtnMetin}>▼  Daha Fazla Haber</Text>
-                  </TouchableOpacity>
-                )}
               </View>
             ) : (
               <Text style={{ color: RENKLER.metinIkincil, textAlign: 'center', marginVertical: 20 }}>
@@ -538,6 +530,26 @@ const FinansEkrani: React.FC = () => {
               </Text>
             )}
           </View>
+
+          {/* Daha Fazla / Küçült Butonu */}
+          {guncelHaberListesi.length > 0 && (
+            <TouchableOpacity
+              style={st.dahaFazlaBtn}
+              onPress={() => {
+                if (gosterilenHaberSayisi < guncelHaberListesi.length) {
+                  setGosterilenHaberSayisi(prev => prev + 3);
+                } else {
+                  setGosterilenHaberSayisi(3);
+                }
+              }}
+            >
+              <Text style={st.dahaFazlaBtnMetin}>
+                {gosterilenHaberSayisi < guncelHaberListesi.length
+                  ? '▼  Daha Fazla Haber'
+                  : '▲  Küçült'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
         </View>
       </ScrollView>

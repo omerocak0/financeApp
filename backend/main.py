@@ -1,8 +1,10 @@
 import os
-from typing import Literal, List
+import json
+from typing import List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -29,14 +31,17 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL = "gemini-2.5-flash"
 
 # ── Veri Modelleri ────────────────────────────────────────────────────────────
+class HaberGirdisi(BaseModel):
+    haber_metni: str = Field(..., description="Analiz edilecek finansal haber metni")
+
 class HaberAnalizi(BaseModel):
     ozet: str = Field(..., description="Haberin halk diliyle basit özeti")
     manipulasyon_skoru: int = Field(..., ge=0, le=100, description="Manipülasyon skoru (0-100)")
-    risk_seviyesi: Literal["DÜŞÜK", "ORTA", "YÜKSEK"] = Field(..., description="Finansal risk seviyesi")
+    risk_seviyesi: str = Field(..., description="Finansal risk seviyesi (DÜŞÜK, ORTA veya YÜKSEK)")
     eylem_onerisi: str = Field(..., description="Yatırımcıya yönelik koruma tavsiyesi")
 
 class Mesaj(BaseModel):
-    rol: Literal["user", "model"]
+    rol: str # 'user' veya 'model'
     icerik: str
 
 class SohbetIstegi(BaseModel):
@@ -55,8 +60,12 @@ async def haberi_analiz_et(haber_metni: str):
 
     sistem_talimati = (
         "Sen bir finansal koruma uzmanısın. Küçük yatırımcıları piyasa manipülasyonundan ve "
-        "spekülatif haberlerden korumak için haber metinlerini analiz edersin. "
-        "Haberi analiz et ve yalnızca JSON formatında yanıt ver."
+        "spekülatif haberlerden korumak için haber metinlerini analiz edersin.\n\n"
+        "KESİNLİKLE uymanız gereken kural: manipulasyon_skoru ile risk_seviyesi TUTARLI olmalıdır:\n"
+        "- manipulasyon_skoru 0-33 arası ise risk_seviyesi = 'DÜŞÜK'\n"
+        "- manipulasyon_skoru 34-66 arası ise risk_seviyesi = 'ORTA'\n"
+        "- manipulasyon_skoru 67-100 arası ise risk_seviyesi = 'YÜKSEK'\n\n"
+        "Bu eşiklere KESİNLİKLE uy. Skor ile risk seviyesi ASLA çelişmemeli."
     )
 
     try:
@@ -65,15 +74,26 @@ async def haberi_analiz_et(haber_metni: str):
             contents=haber_metni,
             config=types.GenerateContentConfig(
                 system_instruction=sistem_talimati,
-                temperature=0.2,
+                temperature=0.1,
                 response_mime_type="application/json",
                 response_schema=HaberAnalizi,
             ),
         )
-        return response.parsed
+
+        if response.text:
+            cleaned_text = response.text.strip()
+            if cleaned_text.startswith("```"):
+                cleaned_text = cleaned_text.split("```")[1]
+                if cleaned_text.startswith("json"):
+                    cleaned_text = cleaned_text[4:]
+            json_data = json.loads(cleaned_text.strip())
+            return HaberAnalizi(**json_data)
+
+        raise ValueError("Gemini boş bir yanıt döndürdü.")
+
     except Exception as e:
-        print(f"[Analiz Hatası] {e}")
-        raise HTTPException(status_code=500, detail=f"Analiz başarısız: {str(e)}")
+        print(f"[Analiz Hatası] {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Gemini Hatası: {str(e)}")
 
 @app.post("/sohbet")
 async def sohbet_et(istek: SohbetIstegi):
@@ -105,8 +125,8 @@ async def sohbet_et(istek: SohbetIstegi):
         response = chat.send_message(current_msg)
         return {"yanit": response.text}
     except Exception as e:
-        print(f"[Sohbet Hatası] {e}")
-        raise HTTPException(status_code=500, detail=f"Mesaj iletilemedi: {str(e)}")
+        print(f"[Sohbet Hatası] {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ── Başlat ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

@@ -18,10 +18,15 @@ interface Props {
 }
 
 const HaberAnalizKarti: React.FC<Props> = ({ baslik, analiz }) => {
-  const scoreColor = analiz.manipulasyon_skoru > 60 ? '#ff4d4d' : '#2ecc71';
-  
-  const riskColor = 
-    analiz.risk_seviyesi === 'YÜKSEK' ? '#ff4d4d' : 
+  const s = analiz.manipulasyon_skoru;
+
+  // 0-50 arası yeşil, 50-100 arası kırmızı — ortaya göre renk değişir
+  const scoreColor = s <= 50
+    ? `rgb(${Math.round(s * 4.6)}, 200, 80)`   // yeşilden sarıya
+    : `rgb(220, ${Math.round((100 - s) * 3.6)}, 50)`; // sarıdan kırmızıya
+
+  const riskColor =
+    analiz.risk_seviyesi === 'YÜKSEK' ? '#ff4d4d' :
     analiz.risk_seviyesi === 'ORTA' ? '#f39c12' : '#2ecc71';
 
   return (

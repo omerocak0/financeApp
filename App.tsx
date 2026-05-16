@@ -40,12 +40,12 @@ const ZekaIkon = ({ aktif }: { aktif: boolean }) => (
   </Svg>
 );
 
-/* ─── Özel Alt Navigasyon Çubuğu (Uniform Floating) ──── */
+/* ─── Özel Alt Navigasyon Çubuğu (Sabit Alt Bar) ──── */
 function OzelAltCubuk({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
   
   return (
-    <View style={[st.floatingContainer, { bottom: Math.max(insets.bottom - 12, 8) }]}>
+    <View style={[st.barKapsayici, { paddingBottom: insets.bottom || 8 }]}>
       <View style={st.tabCubuk}>
         {state.routes.map((route: any, index: number) => {
           const { options } = descriptors[route.key];
@@ -110,28 +110,17 @@ export default function UygulamaKoku() {
 }
 
 const st = StyleSheet.create({
-  floatingContainer: {
-    position: 'absolute',
-    left: 10,
-    right: 10,
-    alignItems: 'center',
-    zIndex: 1000,
+  barKapsayici: {
+    width: '100%',
+    backgroundColor: 'rgba(0,0,0,1)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
   },
   tabCubuk: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(0, 0, 0, 1)',
-    borderRadius: 24,
-    height: 64,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'space-around',
-    width: '100%',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 15,
   },
   sekmeKont: {
     flex: 1,

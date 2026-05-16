@@ -169,7 +169,7 @@ const st = StyleSheet.create({
   yukleniyorMetin: { fontSize: 12, color: RENKLER.metinIkincil, fontStyle: 'italic' },
   inputKapsayici: {
     padding: 12,
-    paddingBottom: Platform.OS === 'ios' ? 105 : 85, // Navbar üzerinde sabit durması için
+    paddingBottom: 12,
     backgroundColor: RENKLER.arkaplan,
     borderTopWidth: 1,
     borderTopColor: RENKLER.sinir,
