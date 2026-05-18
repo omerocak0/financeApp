@@ -1,6 +1,6 @@
-/**
- * Backend sunucu adresi.
- * Bilgisayarın Wi-Fi IP: 192.168.1.67
- * Telefon ve bilgisayar AYNI Wi-Fi ağında olmalıdır.
+﻿/**
+ * Backend sunucu adresi - OTOMATIK GUNCELLENDI
+ * Guncellenme zamani: 2026-05-17 22:18
+ * Telefon ve bilgisayar AYNI Wi-Fi aginda olmalidir.
  */
-export const API_URL = 'http://192.168.1.67:8000';
+export const API_URL = 'http://10.62.7.45:8000';
