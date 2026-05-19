@@ -1,61 +1,41 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Platform, TouchableOpacity } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import Svg, { Path, Circle } from 'react-native-svg';
+import * as SplashScreen from 'expo-splash-screen';
+import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 
-import AnaSayfa        from './src/ekranlar/AnaSayfa';
-import FinansEkrani    from './src/ekranlar/FinansEkrani';
+import AnaSayfa from './src/ekranlar/AnaSayfa';
+import FinansEkrani from './src/ekranlar/FinansEkrani';
 import HesaplayiciEkrani from './src/ekranlar/HesaplayiciEkrani';
 import YapayZekaEkrani from './src/ekranlar/YapayZekaEkrani';
-import { RENKLER }     from './src/sabitler/renkler';
+import GirisKayitEkrani from './src/ekranlar/GirisKayitEkrani';
+import ProfilEkrani from './src/ekranlar/ProfilEkrani';
+import CuzdanEkrani from './src/ekranlar/CuzdanEkrani';
+import { RENKLER } from './src/sabitler/renkler';
+import { supabaseIstemcisi } from './src/supabaseIstemcisi';
+
+// Splash ekranı otomatik kapanmasın, biz kontrol edeceğiz
+SplashScreen.preventAutoHideAsync().catch(() => { });
 
 const AltGezintiCubugu = createBottomTabNavigator();
 
-/* ─── SVG ikonlar (Gelişmiş) ─────────────────────────── */
-const EvIkon = ({ aktif }: { aktif: boolean }) => (
-  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-    <Path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"
-      stroke={aktif ? RENKLER.birincilParlak : RENKLER.metinUcuncul} strokeWidth={2}
-      fill={aktif ? RENKLER.birincilParlak + '15' : 'none'} strokeLinejoin="round" />
-    <Path d="M9 21V12h6v9" stroke={aktif ? RENKLER.birincilParlak : RENKLER.metinUcuncul}
-      strokeWidth={2} strokeLinecap="round" />
-  </Svg>
-);
 
-const GrafikIkon = ({ aktif }: { aktif: boolean }) => (
-  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-    <Path d="M3 17h4v4H3v-4zM10 10h4v11h-4V10zM17 4h4v17h-4V4z"
-      fill={aktif ? RENKLER.birincilParlak : RENKLER.metinUcuncul} />
-  </Svg>
-);
-
-const ZekaIkon = ({ aktif }: { aktif: boolean }) => (
-  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-    <Path d="M12 3c.3 0 .6.2.8.5l1.2 3.5 3.5 1.2c.3.1.5.4.5.8s-.2.6-.5.8l-3.5 1.2-1.2 3.5c-.1.3-.4.5-.8.5s-.6-.2-.8-.5l-1.2-3.5-3.5-1.2c-.3-.1-.5-.4-.5-.8s.2-.6.5-.8l3.5-1.2 1.2-3.5c.1-.3.4-.5.8-.5z"
-      fill={aktif ? RENKLER.birincilParlak : RENKLER.metinUcuncul} />
-    <Path d="M19 15l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5.5-1.5zM6 4l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5.5-1.5z"
-      fill={aktif ? RENKLER.birincilParlak : RENKLER.metinUcuncul} />
-  </Svg>
-);
-
-const HesapMakinesiIkon = ({ aktif }: { aktif: boolean }) => (
-  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-    <Path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM9 7h6v4H9V7zm-2 7h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm-8 4h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"
-      fill={aktif ? RENKLER.birincilParlak : RENKLER.metinUcuncul} />
-  </Svg>
-);
 
 /* ─── Özel Alt Navigasyon Çubuğu (Sabit Alt Bar) ──── */
 function OzelAltCubuk({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
-  
+
+  const routeName = state.routes[state.index].name;
+  if (routeName === 'Profil' || routeName === 'Cuzdan') return null;
+
   return (
     <View style={[st.barKapsayici, { paddingBottom: insets.bottom || 8 }]}>
       <View style={st.tabCubuk}>
         {state.routes.map((route: any, index: number) => {
+          if (route.name === 'Profil' || route.name === 'Cuzdan') return null;
           const { options } = descriptors[route.key];
           const isFocused = state.index === index;
 
@@ -71,12 +51,11 @@ function OzelAltCubuk({ state, descriptors, navigation }: any) {
             }
           };
 
-          let Ikon = EvIkon;
-          if (route.name === 'Finans') Ikon = GrafikIkon;
-          if (route.name === 'Hesaplayici') Ikon = HesapMakinesiIkon;
-          if (route.name === 'YapayZeka') Ikon = ZekaIkon;
+          let iconName: any = isFocused ? 'wallet' : 'wallet-outline';
+          if (route.name === 'Finans') iconName = isFocused ? 'stats-chart' : 'stats-chart-outline';
 
-          const etiket = route.name === 'AnaSayfa' ? 'Ana Sayfa' : route.name === 'Finans' ? 'Piyasa' : route.name === 'Hesaplayici' ? 'Hesapla' : 'Yapay Zeka';
+          const etiket = route.name === 'AnaSayfa' ? 'Portfolyo' : route.name === 'Finans' ? 'Piyasalar' : route.name === 'Hesaplayici' ? 'Hesapla' : 'FinAI';
+          const ikonRengi = isFocused ? RENKLER.birincilParlak : RENKLER.metinUcuncul;
 
           return (
             <TouchableOpacity
@@ -86,7 +65,13 @@ function OzelAltCubuk({ state, descriptors, navigation }: any) {
               activeOpacity={0.7}
             >
               <View style={[st.ikonKutu, isFocused && st.ikonKutuAktif]}>
-                <Ikon aktif={isFocused} />
+                {route.name === 'YapayZeka' ? (
+                  <Ionicons name="sparkles" size={26} color={ikonRengi} />
+                ) : route.name === 'Hesaplayici' ? (
+                  <FontAwesome5 name="calculator" size={20} color={ikonRengi} />
+                ) : (
+                  <Ionicons name={iconName} size={24} color={ikonRengi} />
+                )}
               </View>
               <Text style={[st.etiket, isFocused && st.etiketAktif]}>
                 {etiket}
@@ -101,21 +86,53 @@ function OzelAltCubuk({ state, descriptors, navigation }: any) {
 
 /* ─── Uygulama kökü ───────────────────────────────────── */
 export default function UygulamaKoku() {
+  const [oturum, setOturum] = useState<any>(null);
+  const [hazir, setHazir] = useState(false);
+
+  useEffect(() => {
+    // Mevcut oturumu al (arka planda)
+    supabaseIstemcisi.auth.getSession().then(({ data: { session } }) => {
+      setOturum(session);
+      setHazir(true);
+      SplashScreen.hideAsync().catch(() => { });
+    }).catch(() => {
+      setHazir(true);
+      SplashScreen.hideAsync().catch(() => { });
+    });
+
+    // Oturum değişikliklerini dinle
+    const { data: { subscription } } = supabaseIstemcisi.auth.onAuthStateChange((_event, session) => {
+      setOturum(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (!hazir) return null;
+
   return (
-    <SafeAreaProvider>
-      <StatusBar style="light" />
-      <NavigationContainer>
-        <AltGezintiCubugu.Navigator
-          tabBar={props => <OzelAltCubuk {...props} />}
-          screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true }}
-        >
-          <AltGezintiCubugu.Screen name="AnaSayfa" component={AnaSayfa} />
-          <AltGezintiCubugu.Screen name="Finans" component={FinansEkrani} />
-          <AltGezintiCubugu.Screen name="Hesaplayici" component={HesaplayiciEkrani} />
-          <AltGezintiCubugu.Screen name="YapayZeka" component={YapayZekaEkrani} />
-        </AltGezintiCubugu.Navigator>
-      </NavigationContainer>
-    </SafeAreaProvider>
+    <View style={{ flex: 1, backgroundColor: '#000000' }}>
+      <SafeAreaProvider>
+        <StatusBar style="light" />
+        {!oturum ? (
+          <GirisKayitEkrani />
+        ) : (
+          <NavigationContainer>
+            <AltGezintiCubugu.Navigator
+              tabBar={props => <OzelAltCubuk {...props} />}
+              screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true }}
+            >
+              <AltGezintiCubugu.Screen name="AnaSayfa" component={AnaSayfa} />
+              <AltGezintiCubugu.Screen name="Finans" component={FinansEkrani} />
+              <AltGezintiCubugu.Screen name="Hesaplayici" component={HesaplayiciEkrani} />
+              <AltGezintiCubugu.Screen name="YapayZeka" component={YapayZekaEkrani} />
+              <AltGezintiCubugu.Screen name="Profil" component={ProfilEkrani} />
+              <AltGezintiCubugu.Screen name="Cuzdan" component={CuzdanEkrani} />
+            </AltGezintiCubugu.Navigator>
+          </NavigationContainer>
+        )}
+      </SafeAreaProvider>
+    </View>
   );
 }
 
@@ -143,7 +160,7 @@ const st = StyleSheet.create({
     padding: 4,
   },
   ikonKutuAktif: {
-    // Hafif kırmızı parıltı veya ölçekleme gerekirse eklenebilir
+    // Hafif parıltı veya ölçekleme gerekirse eklenebilir
   },
   etiket: {
     fontSize: 10,
@@ -155,5 +172,3 @@ const st = StyleSheet.create({
     color: RENKLER.birincilParlak,
   },
 });
-
-

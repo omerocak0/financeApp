@@ -28,6 +28,8 @@ if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY bulunamadi. Lutfen .env dosyasini kontrol edin.")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+# KRİTİK DEĞİŞİKLİK: Yeni SDK'nın en güncel ve kararlı 2.5 flash modelini tanımlıyoruz
 MODEL = "gemini-2.5-flash"
 
 # ── Veri Modelleri ────────────────────────────────────────────────────────────
@@ -48,13 +50,35 @@ class SohbetIstegi(BaseModel):
     mesajlar: List[Mesaj]
     haber_baglami: str = ""
 
+class StratejiIstegi(BaseModel):
+    amac: str = Field(..., description="Yatirim amaci")
+    psikoloji: str = Field(..., description="Panik yonetimi")
+    deneyim: str = Field(..., description="Finansal okuryazarlik")
+    vade: str = Field(..., description="Yatirim vadesi")
+    butce_orani: str = Field(..., description="Birikim orani")
+    sektor_tercihi: str = Field(..., description="Sektorel tercih")
+
+class OnerilenHisse(BaseModel):
+    hisse_kodu: str
+    oneri_nedeni: str
+    guven_skoru: int = Field(..., ge=0, le=100)
+    risk_durumu: str
+
+class StratejiRaporu(BaseModel):
+    kullanici_profili: str
+    strateji_ozeti: str
+    onerilen_hisseler: List[OnerilenHisse]
+
+
 # ── Rotalar ───────────────────────────────────────────────────────────────────
 @app.get("/")
 async def root():
     return {"mesaj": "Finansal Koruma Katmani API Calisiyor", "durum": "aktif"}
 
+
 @app.post("/analiz", response_model=HaberAnalizi)
-async def haberi_analiz_et(haber_metni: str):
+async def haberi_analiz_et(girdi: HaberGirdisi):
+    haber_metni = girdi.haber_metni
     if not haber_metni.strip():
         raise HTTPException(status_code=400, detail="Haber metni bos olamaz.")
 
@@ -81,19 +105,17 @@ async def haberi_analiz_et(haber_metni: str):
         )
 
         if response.text:
-            cleaned_text = response.text.strip()
-            if cleaned_text.startswith("```"):
-                cleaned_text = cleaned_text.split("```")[1]
-                if cleaned_text.startswith("json"):
-                    cleaned_text = cleaned_text[4:]
-            json_data = json.loads(cleaned_text.strip())
-            return HaberAnalizi(**json_data)
+            return HaberAnalizi(**json.loads(response.text.strip()))
 
         raise ValueError("Gemini bos bir yanit dondurdu.")
 
     except Exception as e:
         print(f"[Analiz Hatasi] {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"Gemini Hatasi: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Yapay zeka analiz servisinde hata oluştu: {str(e)}"
+        )
+
 
 @app.post("/sohbet")
 async def sohbet_et(istek: SohbetIstegi):
@@ -101,16 +123,23 @@ async def sohbet_et(istek: SohbetIstegi):
         raise HTTPException(status_code=400, detail="Mesaj listesi bos olamaz.")
 
     sistem_talimati = (
-        "Sen deneyimli bir finans asistanisin. Kullanicinin piyasalar, hisseler ve ekonomiyle ilgili "
-        "sorularini net ve anlasılir sekilde yanitla. "
-        + (f"Referans haber baglami: {istek.haber_baglami}" if istek.haber_baglami else "")
+        "Sen üst düzey, profesyonel bir 'Finansal Analiz ve Koruma Asistanı'sın. "
+        "Kullanıcıya daima zengin, veri odaklı ve iyi yapılandırılmış cevaplar ver. "
+        "Şu kurallara KESİNLİKLE uy:\n"
+        "1. Gerektiğinde kıyaslamalar veya finansal metrikler için **Markdown Tabloları** kullan.\n"
+        "2. Konuları **madde imleri (bullet points)** veya numaralandırılmış listelerle açıkla.\n"
+        "3. Önemli terimleri, hisse kodlarını ve risk uyarılarını **kalın (bold)** yaz.\n"
+        "4. Uzun ve sıkıcı paragraflardan kaçın, metinleri başlıklar (###) ile bölümlere ayır.\n"
+        "5. Daima risk yönetimi ve yatırımcı psikolojisini korumaya yönelik profesyonel bir dil kullan.\n"
+        + (f"Referans haber bağlamı: {istek.haber_baglami}" if istek.haber_baglami else "")
     )
 
     try:
-        history = [
-            types.Content(role=m.rol, parts=[types.Part(text=m.icerik)])
-            for m in istek.mesajlar[:-1]
-        ]
+        history = []
+        for m in istek.mesajlar[:-1]:
+            role = "model" if m.rol in ["assistant", "model"] else "user"
+            history.append(types.Content(role=role, parts=[types.Part.from_text(text=m.icerik)]))
+            
         current_msg = istek.mesajlar[-1].icerik
 
         chat = client.chats.create(
@@ -126,34 +155,17 @@ async def sohbet_et(istek: SohbetIstegi):
         return {"yanit": response.text}
     except Exception as e:
         print(f"[Sohbet Hatasi] {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=503,
+            detail=f"Yapay zeka sohbet servisi şu an kullanılamıyor: {str(e)}"
+        )
 
-
-# ── Strateji Modelleri ────────────────────────────────────────────────────────
-class StratejiIstegi(BaseModel):
-    amac: str = Field(..., description="Yatirim amaci")
-    psikoloji: str = Field(..., description="Panik yonetimi")
-    deneyim: str = Field(..., description="Finansal okuryazarlik")
-    vade: str = Field(..., description="Yatirim vadesi")
-    butce_orani: str = Field(..., description="Birikim orani")
-    sektor_tercihi: str = Field(..., description="Sektorel tercih")
-
-class OnerilenHisse(BaseModel):
-    hisse_kodu: str
-    oneri_nedeni: str
-    guven_skoru: int = Field(..., ge=0, le=100)
-    risk_durumu: str
-
-class StratejiRaporu(BaseModel):
-    kullanici_profili: str
-    strateji_ozeti: str
-    onerilen_hisseler: List[OnerilenHisse]
 
 @app.post("/strateji", response_model=StratejiRaporu)
 async def strateji_olustur(istek: StratejiIstegi):
     sistem_talimati = (
         "Sen Turkiye borsasinda uzmanlasmis bir kisisel finans danismanissin. "
-        "Kullanicinin yatirim profili, risk psikolojisi ve sektorel tercihlerine gore BIST hisselerinden "
+        "Kullanicinin yatirim profilim, risk psikolojisi ve sektorel tercihlerine gore BIST hisselerinden "
         "kisisellestirilmis portfoy stratejisi olusturursun.\n\n"
         "KURALLAR:\n"
         "- Sadece gercek BIST hisse kodlari kullan (KCHOL, TUPRS, ASELS, THYAO, GARAN, EREGL, BIMAS, AKBNK, SAHOL, SISE, FROTO, PGSUS, KOZAL, TCELL vb.)\n"
@@ -184,19 +196,22 @@ async def strateji_olustur(istek: StratejiIstegi):
             ),
         )
         if response.text:
-            cleaned = response.text.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("```")[1]
-                if cleaned.startswith("json"):
-                    cleaned = cleaned[4:]
-            data = json.loads(cleaned.strip())
-            return StratejiRaporu(**data)
+            return StratejiRaporu(**json.loads(response.text.strip()))
+            
         raise ValueError("Bos yanit.")
     except Exception as e:
         print(f"[Strateji Hatasi] {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return StratejiRaporu(
+            kullanici_profili="Profil oluşturulamadı (Bağlantı Hatası)",
+            strateji_ozeti=f"Yapay zeka servisine erişilemediği için genel portföy gösteriliyor. Hata: {str(e)}",
+            onerilen_hisseler=[
+                OnerilenHisse(hisse_kodu="THYAO", oneri_nedeni="Güçlü bilanço ve artan sektörel hacim (Örnek Veri)", guven_skoru=80, risk_durumu="ORTA"),
+                OnerilenHisse(hisse_kodu="KCHOL", oneri_nedeni="Holding iskontosu ve defansif yapı (Örnek Veri)", guven_skoru=85, risk_durumu="DUSUK"),
+                OnerilenHisse(hisse_kodu="TUPRS", oneri_nedeni="Temettü verimliliği ve güçlü nakit akışı (Örnek Veri)", guven_skoru=75, risk_durumu="ORTA")
+            ]
+        )
 
-# ── Baslat ────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

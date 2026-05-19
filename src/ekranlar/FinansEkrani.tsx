@@ -173,7 +173,14 @@ const HaberKartıBileşeni = ({
     )}
     {aiAnalizi && (
       <View style={{ position: 'relative' }}>
-        <HaberAnalizKarti baslik={haber.baslik} analiz={aiAnalizi} />
+        {aiAnalizi.hata ? (
+          <View style={{ backgroundColor: '#1a0a0a', borderRadius: 10, padding: 14, marginTop: 8, borderWidth: 1, borderColor: '#8B0000' }}>
+            <Text style={{ color: '#ff6b6b', fontSize: 13, fontWeight: '700', marginBottom: 4 }}>⚠️ Analiz Yapılamadı</Text>
+            <Text style={{ color: '#aaa', fontSize: 12 }}>{aiAnalizi.hata}</Text>
+          </View>
+        ) : (
+          <HaberAnalizKarti baslik={haber.baslik} analiz={aiAnalizi} />
+        )}
       </View>
     )}
   </View>
@@ -235,45 +242,61 @@ const FinansEkrani: React.FC = () => {
     if (aiYukleniyor) return;
     setAiYukleniyor(haber.id);
     try {
-      const res = await fetch(`${API_URL}/analiz?haber_metni=` + encodeURIComponent(haber.baslik + " " + haber.ozet), {
-        method: 'POST'
+      const haberMetni = (haber.baslik + ' ' + (haber.ozet || '')).trim();
+      const res = await fetch(`${API_URL}/analiz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ haber_metni: haberMetni })
       });
-      if (!res.ok) throw new Error('Sunucu hatası');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const mesaj = errData.detail || 'Yapay zeka servisi şu an kullanılamıyor.';
+        setAiAnalizleri(prev => ({ ...prev, [haber.id]: { hata: mesaj } }));
+        return;
+      }
       const data = await res.json();
       setAiAnalizleri(prev => ({ ...prev, [haber.id]: data }));
     } catch (error) {
-      console.error("AI Analiz Hatası:", error);
-      alert("Yapay zeka sunucusuna bağlanılamadı.");
+      setAiAnalizleri(prev => ({ ...prev, [haber.id]: { hata: 'Sunucuya bağlanılamadı. Sunucunun çalıştığından emin olun.' } }));
     } finally {
       setAiYukleniyor(null);
     }
   };
 
   useEffect(() => {
-    const yeniFiyatlar: Record<string, { fiyat: number, degisimYuzde: number }> = {};
-    const promises = VARSAYILAN_HISSELER.map(h => {
-      // @ts-ignore
-      const sStr = h.kategori === 'BIST' ? `${h.sembol}.IS` : h.sembol;
-      return fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sStr}?range=5d&interval=1d`)
-        .then(res => res.json())
-        .then(data => {
-          if (!data.chart?.result) return;
-          const meta = data.chart.result[0].meta;
-          const quotes = data.chart.result[0].indicators.quote[0];
-          let son = 0, onceki = 0;
-          if (quotes.close) {
-            const gecerli = quotes.close.filter((c: any) => c !== null);
-            if (gecerli.length > 1) {
-              son = gecerli[gecerli.length - 1];
-              onceki = gecerli[gecerli.length - 2];
-            }
-          }
-          const anlik = meta.regularMarketPrice || son;
-          const dy = onceki ? ((anlik - onceki) / onceki) * 100 : (meta.regularMarketChangePercent || 0);
-          yeniFiyatlar[h.sembol] = { fiyat: anlik, degisimYuzde: dy };
-        }).catch(() => { });
-    });
-    Promise.all(promises).then(() => setAnlikFiyatlar({ ...yeniFiyatlar }));
+    const fiyatlariAl = async () => {
+      const yeniFiyatlar: Record<string, { fiyat: number, degisimYuzde: number }> = {};
+      const chunkSize = 5;
+      for (let i = 0; i < VARSAYILAN_HISSELER.length; i += chunkSize) {
+        const chunk = VARSAYILAN_HISSELER.slice(i, i + chunkSize);
+        const promises = chunk.map(h => {
+          // @ts-ignore
+          const sStr = h.kategori === 'BIST' ? `${h.sembol}.IS` : h.sembol;
+          return fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sStr}?range=5d&interval=1d`)
+            .then(res => res.json())
+            .then(data => {
+              if (!data.chart?.result) return;
+              const meta = data.chart.result[0].meta;
+              const quotes = data.chart.result[0].indicators.quote[0];
+              let son = 0, onceki = 0;
+              if (quotes.close) {
+                const gecerli = quotes.close.filter((c: any) => c !== null);
+                if (gecerli.length > 1) {
+                  son = gecerli[gecerli.length - 1];
+                  onceki = gecerli[gecerli.length - 2];
+                }
+              }
+              const anlik = meta.regularMarketPrice || son;
+              const dy = onceki ? ((anlik - onceki) / onceki) * 100 : (meta.regularMarketChangePercent || 0);
+              yeniFiyatlar[h.sembol] = { fiyat: anlik, degisimYuzde: dy };
+            }).catch(() => { });
+        });
+        await Promise.all(promises);
+        await new Promise(res => setTimeout(res, 300));
+      }
+      setAnlikFiyatlar({ ...yeniFiyatlar });
+    };
+    fiyatlariAl();
   }, []);
 
   useEffect(() => {
