@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput,
-  TouchableOpacity, StatusBar, Dimensions, Modal, Platform, Linking
+  TouchableOpacity, StatusBar, Dimensions, Modal, Platform, Linking, Image
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { WebView } from 'react-native-webview';
@@ -12,6 +12,23 @@ import MumGrafik from '../bilesenler/MumGrafik';
 import { BilgiIkonu } from '../bilesenler/BilgiIkonu';
 import HaberAnalizKarti from '../bilesenler/HaberAnalizKarti';
 import { API_URL } from '../sabitler/api';
+
+const LogoResim = ({ sembol, sirketAdi, kategori, boyut = 36 }: { sembol: string, sirketAdi: string, kategori?: string, boyut?: number }) => {
+  const [hata, setHata] = useState(false);
+  const getUrl = () => {
+    if (hata) return `https://ui-avatars.com/api/?name=${encodeURIComponent(sirketAdi || sembol)}&background=random&color=fff&rounded=true&bold=true`;
+    if (kategori === 'Kripto') {
+      const s = sembol.replace('-USD', '').toLowerCase();
+      return `https://assets.coincap.io/assets/icons/${s}@2x.png`;
+    }
+    if (kategori === 'ABD' || kategori === 'BIST') {
+      const sStr = kategori === 'BIST' ? `${sembol}.IS` : sembol;
+      return `https://financialmodelingprep.com/image-stock/${sStr}.png`;
+    }
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(sirketAdi || sembol)}&background=random&color=fff&rounded=true&bold=true`;
+  };
+  return <Image source={{ uri: getUrl() }} style={{ width: boyut, height: boyut, borderRadius: boyut / 2, backgroundColor: '#2A2A35' }} onError={() => setHata(true)} />;
+};
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const YATAY_PAD = 12;
@@ -172,6 +189,8 @@ const FinansEkrani: React.FC = () => {
   const [dilim, setDilim] = useState<Dilim>('1A');
   const [zoom, setZoom] = useState(1);
   const [modalAcik, setModal] = useState(false);
+  const [tumuModalAcik, setTumuModalAcik] = useState(false);
+  const [gorunenKategoriSayisi, setGorunenKategoriSayisi] = useState<Record<string, number>>({});
 
   const [seciliHisseAdi, setSeciliHisseAdi] = useState(sec.sirketAdi);
   const [haberYukleniyorMu, setHaberYukleniyorMu] = useState(false);
@@ -181,6 +200,16 @@ const FinansEkrani: React.FC = () => {
   const [aiAnalizleri, setAiAnalizleri] = useState<Record<string, any>>({});
   const [aiYukleniyor, setAiYukleniyor] = useState<string | null>(null);
   const [gosterilenHaberSayisi, setGosterilenHaberSayisi] = useState(3);
+
+  const kategorizeHisseler = useMemo(() => {
+    return VARSAYILAN_HISSELER.reduce((acc, hisse) => {
+      // @ts-ignore
+      const kat = hisse.kategori || 'Diğer';
+      if (!acc[kat]) acc[kat] = [];
+      acc[kat].push(hisse);
+      return acc;
+    }, {} as Record<string, HisseSenedi[]>);
+  }, []);
 
   const analiziKapat = (haberId: string) => {
     setAiAnalizleri(prev => {
@@ -223,7 +252,8 @@ const FinansEkrani: React.FC = () => {
   useEffect(() => {
     const yeniFiyatlar: Record<string, { fiyat: number, degisimYuzde: number }> = {};
     const promises = VARSAYILAN_HISSELER.map(h => {
-      const sStr = h.para === 'TRY' ? `${h.sembol}.IS` : h.sembol;
+      // @ts-ignore
+      const sStr = h.kategori === 'BIST' ? `${h.sembol}.IS` : h.sembol;
       return fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sStr}?range=5d&interval=1d`)
         .then(res => res.json())
         .then(data => {
@@ -252,7 +282,8 @@ const FinansEkrani: React.FC = () => {
     setAktifHisse(sec);
 
     // Gerçek 5 yıllık geçmişi çekip tüm anlık değerleri grafikten türetelim
-    const sembolStr = sec.para === 'TRY' ? `${sec.sembol}.IS` : sec.sembol;
+    // @ts-ignore
+    const sembolStr = sec.kategori === 'BIST' ? `${sec.sembol}.IS` : sec.sembol;
     fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sembolStr}?range=5y&interval=1d`)
       .then(res => res.json())
       .then(data => {
@@ -386,33 +417,46 @@ const FinansEkrani: React.FC = () => {
         contentContainerStyle={{ paddingBottom: 20 }}>
 
         {/* Yatay hisse listesi — içerikle birlikte kayar */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          style={{ backgroundColor: RENKLER.arkaplan }}
-          contentContainerStyle={{ paddingHorizontal: YATAY_PAD, paddingVertical: 10, gap: 8 }}>
-          {liste.map(h => {
-            const anlik = anlikFiyatlar[h.sembol];
-            const dy = anlik ? anlik.degisimYuzde : h.degisimYuzde;
-            const p = dy >= 0;
-            const s = sec.sembol === h.sembol;
-            return (
-              <TouchableOpacity key={h.sembol} style={[st.chip, s && st.chipSec]} onPress={() => { setSec(h); setZoom(1); }} activeOpacity={0.75}>
-                <Text style={[st.chipSembol, s && { color: RENKLER.arkaplan }]}>{h.sembol}</Text>
-                <Text style={[st.chipPara, { color: p ? RENKLER.yukselis : RENKLER.dusus }]}>
-                  {p ? '+' : ''}{dy.toFixed(2)}%
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: RENKLER.arkaplan }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingLeft: YATAY_PAD, paddingRight: 10, paddingVertical: 10, gap: 8 }}>
+            {liste.map(h => {
+              const anlik = anlikFiyatlar[h.sembol];
+              const dy = anlik ? anlik.degisimYuzde : h.degisimYuzde;
+              const p = dy >= 0;
+              const s = sec.sembol === h.sembol;
+              return (
+                <TouchableOpacity key={h.sembol} style={[st.chip, s && st.chipSec]} onPress={() => { setSec(h); setZoom(1); }} activeOpacity={0.75}>
+                  {/* @ts-ignore */}
+                  <LogoResim sembol={h.sembol} sirketAdi={h.sirketAdi} kategori={h.kategori} boyut={18} />
+                  <Text style={[st.chipSembol, s && { color: RENKLER.arkaplan }]}>{h.sembol}</Text>
+                  <Text style={[st.chipPara, { color: p ? RENKLER.yukselis : RENKLER.dusus }]}>
+                    {p ? '+' : ''}{dy.toFixed(2)}%
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <View style={{ paddingRight: YATAY_PAD, paddingVertical: 10, backgroundColor: RENKLER.arkaplan }}>
+            <TouchableOpacity style={st.sabitTumuBtn} onPress={() => { setTumuModalAcik(true); setGorunenKategoriSayisi({}); }} activeOpacity={0.75}>
+              <Text style={st.sabitTumuIkon}>{'>'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         <View style={{ padding: YATAY_PAD, gap: 8 }}>
 
           {/* Fiyat kartı */}
           <View style={st.fiyatKart}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <View style={{ flex: 1 }}>
-                <Text style={st.sembol}>{aktifHisse.sembol}</Text>
-                <Text style={st.sirket}>{aktifHisse.sirketAdi}</Text>
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {/* @ts-ignore */}
+                <LogoResim sembol={aktifHisse.sembol} sirketAdi={aktifHisse.sirketAdi} kategori={aktifHisse.kategori} boyut={42} />
+                <View>
+                  <Text style={st.sembol}>{aktifHisse.sembol}</Text>
+                  <Text style={st.sirket}>{aktifHisse.sirketAdi}</Text>
+                </View>
               </View>
               <View style={[st.degRozet, { backgroundColor: poz ? RENKLER.yukselisArka : RENKLER.dususArka }]}>
                 <Text style={[st.degMetin, { color: dRenk }]}>{poz ? '▲' : '▼'} {Math.abs(dinamikYuzde).toFixed(2)}%</Text>
@@ -578,6 +622,63 @@ const FinansEkrani: React.FC = () => {
         </View>
       </Modal>
 
+      {/* Tüm Varlıklar Modalı */}
+      <Modal visible={tumuModalAcik} animationType="slide" transparent>
+        <View style={st.modalArka}>
+          <View style={[st.modalKart, { flex: 1, marginTop: Platform.OS === 'ios' ? 50 : 20, paddingBottom: 0 }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={{ color: RENKLER.metin, fontWeight: '800', fontSize: 18 }}>Tüm Piyasalar</Text>
+              <TouchableOpacity onPress={() => setTumuModalAcik(false)} style={st.kapatBtn}>
+                <Text style={{ color: RENKLER.metin, fontSize: 16 }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+              {Object.entries(kategorizeHisseler).map(([kategori, hisseler]) => {
+                const gorunen = gorunenKategoriSayisi[kategori] || 5;
+                const gosterilecek = hisseler.slice(0, gorunen);
+                const dahaVarMi = hisseler.length > gorunen;
+                
+                return (
+                <View key={kategori} style={{ marginBottom: 20 }}>
+                  <Text style={{ color: RENKLER.metinIkincil, fontSize: 14, fontWeight: '700', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>{kategori}</Text>
+                  <View style={{ gap: 8 }}>
+                    {gosterilecek.map(h => {
+                      const anlik = anlikFiyatlar[h.sembol];
+                      const dy = anlik ? anlik.degisimYuzde : h.degisimYuzde;
+                      const p = dy >= 0;
+                      return (
+                        <TouchableOpacity key={h.sembol} style={st.kategoriKart} onPress={() => { setSec(h); setZoom(1); setTumuModalAcik(false); }}>
+                          <View style={{ marginRight: 12 }}>
+                            {/* @ts-ignore */}
+                            <LogoResim sembol={h.sembol} sirketAdi={h.sirketAdi} kategori={h.kategori} boyut={36} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: RENKLER.metin, fontSize: 15, fontWeight: '700' }}>{h.sembol}</Text>
+                            <Text style={{ color: RENKLER.metinUcuncul, fontSize: 12 }}>{h.sirketAdi}</Text>
+                          </View>
+                          <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={{ color: RENKLER.metin, fontSize: 14, fontWeight: '600' }}>{h.para === 'TRY' ? '₺' : '$'}{anlik?.fiyat ? anlik.fiyat.toFixed(2) : '...'}</Text>
+                            <Text style={{ color: p ? RENKLER.yukselis : RENKLER.dusus, fontSize: 12, fontWeight: '700' }}>{p ? '+' : ''}{dy.toFixed(2)}%</Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  {dahaVarMi && (
+                    <TouchableOpacity
+                      style={st.dahaFazlaKategoriBtn}
+                      onPress={() => setGorunenKategoriSayisi(p => ({ ...p, [kategori]: gorunen + 5 }))}
+                    >
+                      <Text style={st.dahaFazlaBtnMetin}>▼ Daha Fazla Göster</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )})}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Haber Detay Modalı */}
       <Modal visible={seciliHaber !== null} animationType="slide" transparent>
         <View style={st.modalArka}>
@@ -674,7 +775,11 @@ const st = StyleSheet.create({
   analizYukleniyor: { backgroundColor: '#7e57c210', borderRadius: 8, padding: 12, marginTop: 6, borderWidth: 1, borderColor: '#7e57c244' },
   analizYukleniyorMetin: { color: '#7e57c2', fontSize: 13, fontWeight: '700', textAlign: 'center' },
   dahaFazlaBtn: { backgroundColor: RENKLER.kartIki, borderRadius: 10, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: RENKLER.sinir, marginTop: 4 },
+  dahaFazlaKategoriBtn: { backgroundColor: RENKLER.kartIki, borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: RENKLER.sinir, marginTop: 8 },
   dahaFazlaBtnMetin: { color: RENKLER.metinIkincil, fontSize: 13, fontWeight: '700' },
+  sabitTumuBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: RENKLER.kartIki, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: RENKLER.sinir },
+  sabitTumuIkon: { color: RENKLER.metin, fontWeight: '900', fontSize: 16 },
+  kategoriKart: { backgroundColor: RENKLER.kartIki, borderRadius: 12, padding: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: RENKLER.sinir },
 });
 
 export default FinansEkrani;

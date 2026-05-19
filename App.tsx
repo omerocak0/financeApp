@@ -8,6 +8,7 @@ import Svg, { Path, Circle } from 'react-native-svg';
 
 import AnaSayfa        from './src/ekranlar/AnaSayfa';
 import FinansEkrani    from './src/ekranlar/FinansEkrani';
+import HesaplayiciEkrani from './src/ekranlar/HesaplayiciEkrani';
 import YapayZekaEkrani from './src/ekranlar/YapayZekaEkrani';
 import { RENKLER }     from './src/sabitler/renkler';
 
@@ -40,6 +41,13 @@ const ZekaIkon = ({ aktif }: { aktif: boolean }) => (
   </Svg>
 );
 
+const HesapMakinesiIkon = ({ aktif }: { aktif: boolean }) => (
+  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+    <Path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM9 7h6v4H9V7zm-2 7h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm-8 4h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"
+      fill={aktif ? RENKLER.birincilParlak : RENKLER.metinUcuncul} />
+  </Svg>
+);
+
 /* ─── Özel Alt Navigasyon Çubuğu (Sabit Alt Bar) ──── */
 function OzelAltCubuk({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
@@ -65,9 +73,10 @@ function OzelAltCubuk({ state, descriptors, navigation }: any) {
 
           let Ikon = EvIkon;
           if (route.name === 'Finans') Ikon = GrafikIkon;
+          if (route.name === 'Hesaplayici') Ikon = HesapMakinesiIkon;
           if (route.name === 'YapayZeka') Ikon = ZekaIkon;
 
-          const etiket = route.name === 'AnaSayfa' ? 'Ana Sayfa' : route.name === 'Finans' ? 'Piyasa' : 'Yapay Zeka';
+          const etiket = route.name === 'AnaSayfa' ? 'Ana Sayfa' : route.name === 'Finans' ? 'Piyasa' : route.name === 'Hesaplayici' ? 'Hesapla' : 'Yapay Zeka';
 
           return (
             <TouchableOpacity
@@ -102,6 +111,7 @@ export default function UygulamaKoku() {
         >
           <AltGezintiCubugu.Screen name="AnaSayfa" component={AnaSayfa} />
           <AltGezintiCubugu.Screen name="Finans" component={FinansEkrani} />
+          <AltGezintiCubugu.Screen name="Hesaplayici" component={HesaplayiciEkrani} />
           <AltGezintiCubugu.Screen name="YapayZeka" component={YapayZekaEkrani} />
         </AltGezintiCubugu.Navigator>
       </NavigationContainer>

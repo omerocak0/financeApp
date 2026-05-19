@@ -1,435 +1,429 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, Dimensions, ActivityIndicator, Animated
+  StatusBar, Dimensions, ActivityIndicator, TextInput, Modal
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons } from '@expo/vector-icons';
-import { API_URL } from '../sabitler/api';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { supabaseIstemcisi } from '../supabaseIstemcisi';
+import { VARSAYILAN_HISSELER } from '../veriler/hisseVerileri';
 
 const { width: SW } = Dimensions.get('window');
 
 // ── Tip Tanımları ─────────────────────────────────────────────────────────────
-
-type RiskDurumu = 'DUSUK' | 'ORTA' | 'YUKSEK';
-
-interface OnerilenHisse {
-  hisse_kodu: string;
-  oneri_nedeni: string;
-  guven_skoru: number;
-  risk_durumu: RiskDurumu;
+interface PortfoyItem {
+  id: string;
+  varlik_kodu: string;
+  varlik_miktari: number;
+  alis_fiyati: number;
+  alis_tarihi: string;
 }
 
-interface StratejiSonucu {
-  kullanici_profili: string;
-  strateji_ozeti: string;
-  onerilen_hisseler: OnerilenHisse[];
+interface AlarmItem {
+  id: string;
+  varlik_kodu: string;
+  alarm_tipi: string;
+  yon_isareti: string;
+  hedef_deger: number;
 }
 
-interface AnketCevaplari {
-  amac: string;
-  psikoloji: string;
-  deneyim: string;
-  vade: string;
-  butce_orani: string;
-  sektor_tercihi: string;
+interface TakipItem {
+  id: string;
+  varlik_kodu: string;
 }
 
-// ── Anket Soruları (6 Adım) ───────────────────────────────────────────────────
+export default function AnaSayfa() {
+  // ── State (Kullanıcının Talep Ettiği İsimler) ──────────────────────────────
+  const [portfoyVerileri, setPortfoyVerileri] = useState<PortfoyItem[]>([]);
+  const [alarmVerileri, setAlarmVerileri] = useState<AlarmItem[]>([]);
+  const [takipListesiVerileri, setTakipListesiVerileri] = useState<TakipItem[]>([]);
+  
+  const [toplamBakiye, setToplamBakiye] = useState<number>(0);
+  const [karZararYuzdesi, setKarZararYuzdesi] = useState<number>(0);
+  
+  const [aktifSekme, setAktifSekme] = useState<'Varlıklarım' | 'Takip Listesi'>('Varlıklarım');
+  const [yukleniyorDurumu, setYukleniyorDurumu] = useState<boolean>(true);
+  const [modalGorunurlugu, setModalGorunurlugu] = useState<boolean>(false);
+  const [ekleModalGorunurlugu, setEkleModalGorunurlugu] = useState<boolean>(false);
 
-const SORULAR = [
-  {
-    id: 'amac',
-    baslik: 'Bu yatırımla birincil amacınız nedir?',
-    alt: 'Finansal hedefinizi belirleyelim.',
-    ikon: 'track-changes' as const,
-    secenekler: [
-      { deger: 'Enflasyona karsi parayi korumak', etiket: 'Enflasyona Karşı Korumak', alt: 'Sermayemi güvene almak', ikon: 'shield' as const },
-      { deger: 'Duzenli temettu geliri elde etmek', etiket: 'Düzenli Temettü Geliri', alt: 'Pasif gelir yaratmak', ikon: 'payments' as const },
-      { deger: 'Agresif buyume ve sermaye artisi', etiket: 'Agresif Büyüme', alt: 'Yüksek sermaye artışı', ikon: 'rocket-launch' as const },
-    ],
-  },
-  {
-    id: 'psikoloji',
-    baslik: 'Yatırımınız bir ayda %20 değer kaybetse ne yaparsınız?',
-    alt: 'Piyasa dalgalanmalarına karşı tepkiniz nedir?',
-    ikon: 'psychology' as const,
-    secenekler: [
-      { deger: 'Panik yapip hemen satarim', etiket: 'Panik Yapıp Satarım', alt: 'Zararı kesmek isterim', ikon: 'mood-bad' as const },
-      { deger: 'Sakin kalip piyasayi beklerim', etiket: 'Sakin Kalıp Beklerim', alt: 'Uzun vadeye odaklanırım', ikon: 'self-improvement' as const },
-      { deger: 'Firsat bilip ekstra alim yaparim', etiket: 'Ekstra Alım Yaparım', alt: 'Ortalama düşürürüm', ikon: 'trending-up' as const },
-    ],
-  },
-  {
-    id: 'deneyim',
-    baslik: 'Borsa konusundaki deneyiminiz nedir?',
-    alt: 'Finansal okuryazarlık seviyeniz.',
-    ikon: 'school' as const,
-    secenekler: [
-      { deger: 'Tamamen yeniyim', etiket: 'Tamamen Yeniyim', alt: 'Henüz öğreniyorum', ikon: 'child-care' as const },
-      { deger: 'Orta duzeydeyim (Temel kavramlar)', etiket: 'Orta Düzeydeyim', alt: 'Temel kavramlara hakimim', ikon: 'book' as const },
-      { deger: 'Deneyimli (Bilanco okuyabilirim)', etiket: 'Deneyimliyim', alt: 'Bilanço ve grafik okurum', ikon: 'menu-book' as const },
-    ],
-  },
-  {
-    id: 'vade',
-    baslik: 'Yatırdığınız paraya ne kadar dokunmayacaksınız?',
-    alt: 'Yatırım ufkunuzu seçin.',
-    ikon: 'schedule' as const,
-    secenekler: [
-      { deger: 'Kisa Vade (1-3 Ay)', etiket: 'Kısa Vade', alt: '1 - 3 Ay', ikon: 'flash-on' as const },
-      { deger: 'Orta Vade (3-12 Ay)', etiket: 'Orta Vade', alt: '3 - 12 Ay', ikon: 'calendar-today' as const },
-      { deger: 'Uzun Vade (1 Yil ve uzeri)', etiket: 'Uzun Vade', alt: '1 Yıl ve üzeri', ikon: 'landscape' as const },
-    ],
-  },
-  {
-    id: 'butce_orani',
-    baslik: 'Net gelirinizin ne kadarını yatırıyorsunuz?',
-    alt: 'Aylık birikim kapasiteniz.',
-    ikon: 'account-balance-wallet' as const,
-    secenekler: [
-      { deger: '%10 dan daha az', etiket: '%10\'dan Daha Az', alt: 'Küçük bir miktar', ikon: 'pie-chart-outline' as const },
-      { deger: '%10 ile %30 arasi', etiket: '%10 ile %30 Arası', alt: 'Makul bir miktar', ikon: 'pie-chart' as const },
-      { deger: '%30 dan daha fazla', etiket: '%30\'dan Daha Fazla', alt: 'Büyük bir miktar', ikon: 'donut-large' as const },
-    ],
-  },
-  {
-    id: 'sektor_tercihi',
-    baslik: 'Hangi sektörlere yoğunlaşalım?',
-    alt: 'AI algoritmamızın tarayacağı alanlar.',
-    ikon: 'category' as const,
-    secenekler: [
-      { deger: 'Geleneksel Sektorler (Sanayi/Holding)', etiket: 'Geleneksel Sektörler', alt: 'Sanayi, Holding, Banka', ikon: 'factory' as const },
-      { deger: 'Yenilikci Sektorler (Teknoloji/Savunma)', etiket: 'Yenilikçi Sektörler', alt: 'Teknoloji, Bilişim, Savunma', ikon: 'memory' as const },
-      { deger: 'Fark etmez (Gemini Secsin)', etiket: 'Fark Etmez', alt: 'Yapay zekaya bırakıyorum', ikon: 'auto-awesome' as const },
-    ],
-  },
-];
+  // Canlı fiyatlar mock/fetch
+  const [anlikFiyatlar, setAnlikFiyatlar] = useState<Record<string, number>>({});
+  
+  // Ekleme formu state
+  const [yeniKod, setYeniKod] = useState('');
+  const [yeniMiktar, setYeniMiktar] = useState('');
+  const [yeniFiyat, setYeniFiyat] = useState('');
 
-// ── Fallback Mock Verisi ──────────────────────────────────────────────────────
+  // Alarm formu state
+  const [alarmKod, setAlarmKod] = useState('');
+  const [alarmTip, setAlarmTip] = useState('Hedef Fiyat');
+  const [alarmYon, setAlarmYon] = useState('+');
+  const [alarmDeger, setAlarmDeger] = useState('');
 
-const fallbackOlustur = (cevaplar: AnketCevaplari): StratejiSonucu => {
-  const agresifMi = cevaplar.amac.includes('Agresif') || cevaplar.psikoloji.includes('Firsat');
-
-  if (agresifMi) {
-    return {
-      kullanici_profili: 'Cesur ve Büyüme Odaklı Yatırımcı',
-      strateji_ozeti:
-        'Yüksek risk toleransınız ve agresif büyüme hedefiniz doğrultusunda, kısa vadeli volatilitesi yüksek ancak uzun vadeli getirisi güçlü olabilecek teknoloji ve sanayi hisseleri önerilmektedir. Piyasa düşüşlerini alım fırsatı olarak değerlendirme psikolojiniz, bu stratejinin başarı şansını artırıyor.',
-      onerilen_hisseler: [
-        { hisse_kodu: 'PGSUS', oneri_nedeni: 'Sektörel toparlanma ve agresif operasyonel büyüme hedefleri, yüksek getiri potansiyeli barındırıyor.', guven_skoru: 62, risk_durumu: 'YUKSEK' },
-        { hisse_kodu: 'MIATK', oneri_nedeni: 'Teknoloji ve bilişim sektöründeki yenilikçi adımları, portföyünüzün büyüme ivmesini hızlandırabilir.', guven_skoru: 58, risk_durumu: 'YUKSEK' },
-        { hisse_kodu: 'ASELS', oneri_nedeni: 'Savunma sanayiinin öncüsü olarak, güvenli liman olmakla birlikte ihracat potansiyeliyle büyüme sunar.', guven_skoru: 75, risk_durumu: 'ORTA' },
-      ],
-    };
-  } else {
-    return {
-      kullanici_profili: 'Temkinli ve Defansif Yatırımcı',
-      strateji_ozeti:
-        'Sermayenizi koruma ve stabil büyüme hedefiniz doğrultusunda, endeks ağırlığı yüksek, düzenli temettü ödeyen ve ekonomik dalgalanmalara dayanıklı holding/gıda hisselerinden oluşan bir defansif portföy önerilmektedir.',
-      onerilen_hisseler: [
-        { hisse_kodu: 'BIMAS', oneri_nedeni: 'Gıda perakende sektöründeki liderliği ve defansif yapısı, enflasyonist ortamlarda anaparayı korur.', guven_skoru: 88, risk_durumu: 'DUSUK' },
-        { hisse_kodu: 'KCHOL', oneri_nedeni: 'Çeşitlendirilmiş holding yapısı ve güçlü nakit akışı sayesinde uzun vadeli güvenli büyüme sağlar.', guven_skoru: 85, risk_durumu: 'DUSUK' },
-        { hisse_kodu: 'DOAS', oneri_nedeni: 'Düzenli ve yüksek temettü verimi, pasif gelir beklentinizi destekleyen önemli bir unsurdur.', guven_skoru: 78, risk_durumu: 'ORTA' },
-      ],
-    };
-  }
-};
-
-// ── Yardımcı Fonksiyonlar ─────────────────────────────────────────────────────
-
-const riskRengi = (risk: RiskDurumu) => {
-  if (risk === 'DUSUK') return '#4CAF50';
-  if (risk === 'ORTA') return '#FF9800';
-  return '#D32F2F';
-};
-
-const guvenRengi = (skor: number) => {
-  if (skor >= 70) return '#4CAF50';
-  if (skor >= 50) return '#FF9800';
-  return '#D32F2F';
-};
-
-// ── Alt Bileşenler ────────────────────────────────────────────────────────────
-
-const HisseKarti: React.FC<{ hisse: OnerilenHisse; indeks: number }> = ({ hisse, indeks }) => {
-  const rRenk = riskRengi(hisse.risk_durumu);
-  const gRenk = guvenRengi(hisse.guven_skoru);
-  return (
-    <View style={az.hisseKarti}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <Text style={az.hisseKod}>{hisse.hisse_kodu}</Text>
-        <View style={[az.riskBadge, { backgroundColor: rRenk + '15', borderColor: rRenk + '40' }]}>
-          <Text style={[az.riskBadgeMetin, { color: rRenk }]}>{hisse.risk_durumu} RİSK</Text>
-        </View>
-      </View>
-
-      <View style={{ marginBottom: 12 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-          <Text style={{ fontSize: 11, color: '#888', fontWeight: '500' }}>AI Güven Skoru</Text>
-          <Text style={[{ fontSize: 11, fontWeight: '800' }, { color: gRenk }]}>{hisse.guven_skoru}%</Text>
-        </View>
-        <View style={az.cubukArka}>
-          <View style={[az.cubukOn, { width: `${hisse.guven_skoru}%` as any, backgroundColor: gRenk }]} />
-        </View>
-      </View>
-
-      <View style={az.oneriKutu}>
-        <Text style={az.oneriNedeni}>{hisse.oneri_nedeni}</Text>
-      </View>
-    </View>
-  );
-};
-
-const YukleniyorEkrani: React.FC = () => (
-  <View style={az.yukleniyorKont}>
-    <View style={az.yukleniyorIkonDaire}>
-      <MaterialIcons name="insights" size={32} color="#D32F2F" />
-    </View>
-    <ActivityIndicator size="large" color="#D32F2F" style={{ marginTop: 24, marginBottom: 16 }} />
-    <Text style={az.yukleniyorBaslik}>AI Portföyünüz Hazırlanıyor</Text>
-    <Text style={az.yukleniyorAlt}>
-      BIST verileri taranıyor, risk profiliniz hesaplanıyor ve size en uygun hisseler seçiliyor...
-    </Text>
-  </View>
-);
-
-// ── Ana Bileşen ───────────────────────────────────────────────────────────────
-
-const AnaSayfa: React.FC = () => {
-  const [aktifAdim, setAktifAdim] = useState(0);
-  const [anketCevaplari, setAnketCevaplari] = useState<AnketCevaplari>({
-    amac: '', psikoloji: '', deneyim: '', vade: '', butce_orani: '', sektor_tercihi: ''
-  });
-  const [yukleniyorDurumu, setYukleniyorDurumu] = useState(false);
-  const [stratejiSonucu, setStratejiSonucu] = useState<StratejiSonucu | null>(null);
-
-  // Animasyon state'leri
-  const [fadeAnim] = useState(new Animated.Value(1));
-
-  const animateAdimGecisi = (callback: () => void) => {
-    Animated.sequence([
-      Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
-      Animated.timing(fadeAnim, { toValue: 1, duration: 250, useNativeDriver: true })
-    ]).start();
-
-    setTimeout(callback, 150);
-  };
-
-  const canliStratejiGetir = async (cevaplar: AnketCevaplari) => {
+  // ── Supabase İşlemleri ───────────────────────────────────────────────────────
+  const verileriGetir = async () => {
     setYukleniyorDurumu(true);
     try {
-      const res = await fetch(`${API_URL}/strateji`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cevaplar),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: StratejiSonucu = await res.json();
-      setStratejiSonucu(data);
+      const [resPortfoy, resAlarmlar, resTakip] = await Promise.all([
+        supabaseIstemcisi.from('portfoy').select('*').order('olusturma_tarihi', { ascending: false }),
+        supabaseIstemcisi.from('alarmlar').select('*').order('olusturma_tarihi', { ascending: false }),
+        supabaseIstemcisi.from('takip_listesi').select('*').order('olusturma_tarihi', { ascending: false })
+      ]);
+      
+      if (resPortfoy.data) setPortfoyVerileri(resPortfoy.data);
+      if (resAlarmlar.data) setAlarmVerileri(resAlarmlar.data);
+      if (resTakip.data) setTakipListesiVerileri(resTakip.data);
     } catch (e) {
-      console.warn('[Strateji] API hatasi, fallback kullaniliyor:', e);
-      setStratejiSonucu(fallbackOlustur(cevaplar));
-    } finally {
-      setYukleniyorDurumu(false);
+      console.warn("Veri getirme hatasi", e);
     }
-  };
-
-  const secenekSec = (anahtarAdi: keyof AnketCevaplari, deger: string) => {
-    const yeniCevaplar = { ...anketCevaplari, [anahtarAdi]: deger };
-    setAnketCevaplari(yeniCevaplar);
-
-    if (aktifAdim < SORULAR.length - 1) {
-      animateAdimGecisi(() => setAktifAdim(aktifAdim + 1));
-    } else {
-      canliStratejiGetir(yeniCevaplar);
-    }
-  };
-
-  const anketiSifirla = () => {
-    setAktifAdim(0);
-    setAnketCevaplari({ amac: '', psikoloji: '', deneyim: '', vade: '', butce_orani: '', sektor_tercihi: '' });
-    setStratejiSonucu(null);
     setYukleniyorDurumu(false);
   };
 
-  const mevcutSoru = SORULAR[aktifAdim];
-  const ilerlemeYuzdesi = ((aktifAdim) / SORULAR.length) * 100;
+  const varlikEkle = async (kod: string, miktar: number, fiyat: number) => {
+    try {
+      const { data, error } = await supabaseIstemcisi.from('portfoy').insert({
+        varlik_kodu: kod,
+        varlik_miktari: miktar,
+        alis_fiyati: fiyat
+      }).select();
+      if (!error && data) {
+         setPortfoyVerileri([data[0], ...portfoyVerileri]);
+      }
+    } catch(e) { console.warn(e); }
+  };
 
-  return (
-    <View style={az.kont}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={az.scrollIcerik}>
+  const varlikSil = async (id: string) => {
+    try {
+      await supabaseIstemcisi.from('portfoy').delete().eq('id', id);
+      setPortfoyVerileri(portfoyVerileri.filter(p => p.id !== id));
+    } catch(e) {}
+  };
 
-        {/* ── Sayfa Başlığı ── */}
-        <View style={az.sayfaBaslikKont}>
-          <View>
-            <Text style={az.sayfaBaslik}>Ana Sayfa</Text>
-          </View>
-        </View>
+  const alarmKur = async (kod: string, tip: string, yon: string, deger: number) => {
+    try {
+      const { data, error } = await supabaseIstemcisi.from('alarmlar').insert({
+        varlik_kodu: kod,
+        alarm_tipi: tip,
+        yon_isareti: yon,
+        hedef_deger: deger
+      }).select();
+      if (!error && data) {
+         setAlarmVerileri([data[0], ...alarmVerileri]);
+      }
+    } catch(e) {}
+  };
 
-        {/* ── Ana Kart ── */}
-        <View style={az.anaKart}>
-          {/* Neon Üst Çizgi */}
-          <LinearGradient colors={['#D32F2F', '#8E0000']} style={az.ustCizgi} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+  const takipListesineEkle = async (kod: string) => {
+    try {
+      const { data, error } = await supabaseIstemcisi.from('takip_listesi').insert({
+        varlik_kodu: kod
+      }).select();
+      if (!error && data) {
+         setTakipListesiVerileri([data[0], ...takipListesiVerileri]);
+      }
+    } catch(e) {}
+  };
 
-          {/* Kart İçeriği */}
-          <View style={az.kartIcerik}>
+  const takipListesindenCikar = async (id: string) => {
+    try {
+      await supabaseIstemcisi.from('takip_listesi').delete().eq('id', id);
+      setTakipListesiVerileri(takipListesiVerileri.filter(t => t.id !== id));
+    } catch(e) {}
+  };
 
-            {yukleniyorDurumu ? (
-              <YukleniyorEkrani />
-            ) : stratejiSonucu ? (
-              /* ── SONUÇ EKRANI ── */
-              <View style={az.sonucKont}>
-                <View style={az.sonucHeader}>
-                  <MaterialIcons name="check-circle" size={24} color="#D32F2F" />
-                  <Text style={az.profilBaslik}>Analiz Tamamlandı</Text>
-                </View>
+  // ── Yaşam Döngüsü ve Fiyatlar ────────────────────────────────────────────────
+  useEffect(() => {
+    verileriGetir();
+  }, []);
 
-                <Text style={az.kullaniciProfili}>"{stratejiSonucu.kullanici_profili}"</Text>
+  useEffect(() => {
+    // Portföy güncellendiğinde toplam bakiye ve k/z hesapla
+    let toplam = 0;
+    let maliyet = 0;
+    
+    portfoyVerileri.forEach(p => {
+      // API'den canlı fiyat olmadığı durumda alış fiyatını baz al, yoksa sahte bir piyasa simülasyonu yap (+%5)
+      const fiyat = anlikFiyatlar[p.varlik_kodu] || (p.alis_fiyati * 1.05); 
+      toplam += (p.varlik_miktari * fiyat);
+      maliyet += (p.varlik_miktari * p.alis_fiyati);
+    });
 
-                <View style={az.ozetKutu}>
-                  <Text style={az.ozetMetin}>{stratejiSonucu.strateji_ozeti}</Text>
-                </View>
+    setToplamBakiye(toplam);
+    if (maliyet > 0) {
+      setKarZararYuzdesi(((toplam - maliyet) / maliyet) * 100);
+    } else {
+      setKarZararYuzdesi(0);
+    }
+  }, [portfoyVerileri, anlikFiyatlar]);
 
-                <View style={az.ayirici} />
-
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                  <MaterialIcons name="radar" size={20} color="#D32F2F" />
-                  <Text style={az.hisseBaslik}>AI Seçimi Hisseler</Text>
-                </View>
-
-                <View style={az.hisseListesiKont}>
-                  {stratejiSonucu.onerilen_hisseler.map((h, i) => (
-                    <HisseKarti key={h.hisse_kodu} hisse={h} indeks={i} />
-                  ))}
-                </View>
-
-                <TouchableOpacity style={az.sifirlaBtn} onPress={anketiSifirla} activeOpacity={0.8}>
-                  <MaterialIcons name="refresh" size={18} color="#FFFFFF" />
-                  <Text style={az.sifirlaMetin}>Yeni Bir Strateji Oluştur</Text>
-                </TouchableOpacity>
+  // ── Render Helpers ───────────────────────────────────────────────────────────
+  const renderPortfoy = () => (
+    <View style={st.listeKonteyner}>
+      <TouchableOpacity 
+        style={st.ekleButonGeniş} 
+        onPress={() => setEkleModalGorunurlugu(true)}
+      >
+        <MaterialIcons name="add-circle-outline" size={24} color="#10B981" />
+        <Text style={st.ekleButonMetin}>Yeni Varlık Ekle</Text>
+      </TouchableOpacity>
+      
+      {portfoyVerileri.map(item => {
+        const fiyat = anlikFiyatlar[item.varlik_kodu] || (item.alis_fiyati * 1.05);
+        const deger = item.varlik_miktari * fiyat;
+        const kar = fiyat > item.alis_fiyati;
+        
+        return (
+          <View key={item.id} style={st.kart}>
+            <View style={st.kartSol}>
+              <View style={st.ikonKutu}>
+                <Text style={st.ikonHarf}>{item.varlik_kodu.substring(0, 1)}</Text>
               </View>
-
-            ) : (
-              /* ── ANKET EKRANI ── */
-              <View style={az.anketKont}>
-                {/* İlerleme Çubuğu */}
-                <View style={az.ilerlemeKont}>
-                  <View style={az.ilerlemeArka}>
-                    <View style={[az.ilerlemeOn, { width: `${ilerlemeYuzdesi}%` }]} />
-                  </View>
-                  <Text style={az.adimMetin}>Adım {aktifAdim + 1} / {SORULAR.length}</Text>
-                </View>
-
-                <Animated.View style={{ opacity: fadeAnim }}>
-                  <View style={az.soruKont}>
-                    <View style={az.soruIkonKutu}>
-                      <MaterialIcons name={mevcutSoru.ikon} size={24} color="#D32F2F" />
-                    </View>
-                    <Text style={az.soruBaslik}>{mevcutSoru.baslik}</Text>
-                    <Text style={az.soruAlt}>{mevcutSoru.alt}</Text>
-                  </View>
-
-                  <View style={az.seceneklerGrid}>
-                    {mevcutSoru.secenekler.map((s) => (
-                      <TouchableOpacity
-                        key={s.deger}
-                        style={az.secenekKutu}
-                        onPress={() => secenekSec(mevcutSoru.id as keyof AnketCevaplari, s.deger)}
-                        activeOpacity={0.7}
-                      >
-                        <MaterialIcons name={s.ikon} size={28} color="#555" style={az.secenekIkon} />
-                        <View>
-                          <Text style={az.secenekEtiket}>{s.etiket}</Text>
-                          <Text style={az.secenekAlt}>{s.alt}</Text>
-                        </View>
-                        <View style={az.secenekOk}>
-                          <MaterialIcons name="arrow-forward-ios" size={14} color="#333" />
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </Animated.View>
+              <View>
+                <Text style={st.kartBaslik}>{item.varlik_kodu}</Text>
+                <Text style={st.kartAlt}>Miktar: {item.varlik_miktari}</Text>
               </View>
-            )}
-          </View>
-        </View>
+            </View>
+            
+            <View style={st.kartSag}>
+              <Text style={st.kartDeger}>₺{deger.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              <Text style={[st.kartFiyat, { color: kar ? '#10B981' : '#EF4444' }]}>
+                {kar ? '▲' : '▼'} ₺{fiyat.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+            </View>
 
-      </ScrollView>
+            <TouchableOpacity style={st.silButon} onPress={() => varlikSil(item.id)}>
+              <MaterialIcons name="delete" size={20} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        );
+      })}
     </View>
   );
-};
 
-// ── Stiller ───────────────────────────────────────────────────────────────────
+  const renderTakipListesi = () => (
+    <View style={st.listeKonteyner}>
+      <TouchableOpacity 
+        style={st.ekleButonGeniş} 
+        onPress={() => takipListesineEkle('ASELS')} // Mock Ekleme
+      >
+        <MaterialIcons name="add-alert" size={24} color="#EAB308" />
+        <Text style={[st.ekleButonMetin, { color: '#EAB308' }]}>Alarm Kur / Ekle</Text>
+      </TouchableOpacity>
 
-const az = StyleSheet.create({
-  kont: { flex: 1, backgroundColor: '#0A0A0A' }, // Deepest Black
-  scrollIcerik: { paddingTop: 60, paddingHorizontal: 16, paddingBottom: 100 },
+      {takipListesiVerileri.map(item => {
+        const fiyat = anlikFiyatlar[item.varlik_kodu] || Math.random() * 100;
+        const trend = Math.random() > 0.5;
+        
+        return (
+          <View key={item.id} style={st.kart}>
+            <View style={st.kartSol}>
+              <View style={[st.ikonKutu, { backgroundColor: '#2C2D35' }]}>
+                <MaterialIcons name="show-chart" size={20} color="#FFF" />
+              </View>
+              <View>
+                <Text style={st.kartBaslik}>{item.varlik_kodu}</Text>
+                <Text style={st.kartAlt}>Canlı Piyasa</Text>
+              </View>
+            </View>
+            
+            <View style={[st.fiyatBalon, { backgroundColor: trend ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }]}>
+              <Text style={[st.balonMetin, { color: trend ? '#10B981' : '#EF4444' }]}>
+                ₺{fiyat.toFixed(2)}
+              </Text>
+            </View>
 
-  // Header
-  sayfaBaslikKont: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  sayfaBaslik: { fontSize: 28, fontWeight: '900', color: '#FFFFFF', letterSpacing: 0.5 },
-  sayfaAltBaslik: { fontSize: 13, color: '#888', marginTop: 4, fontWeight: '500' },
-  avatarDaire: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#141414', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#222' },
+            <TouchableOpacity style={st.silButon} onPress={() => takipListesindenCikar(item.id)}>
+              <MaterialIcons name="close" size={20} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        );
+      })}
+    </View>
+  );
 
-  // Ana Kart
-  anaKart: { backgroundColor: '#141414', borderRadius: 20, borderWidth: 1, borderColor: '#222', overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 15, elevation: 10 },
-  ustCizgi: { height: 4, width: '100%' },
-  kartIcerik: { padding: 20 },
+  return (
+    <View style={st.anaGövde}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* ── Üst Bakiye Alanı (Header) ── */}
+      <View style={st.header}>
+        <Text style={st.headerAltBaslik}>Toplam Portföy Değeri</Text>
+        <Text style={st.headerBakiye}>₺{toplamBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+        <View style={[st.yuzdeRozet, { backgroundColor: karZararYuzdesi >= 0 ? '#10B98120' : '#EF444420' }]}>
+          <MaterialIcons name={karZararYuzdesi >= 0 ? 'trending-up' : 'trending-down'} size={16} color={karZararYuzdesi >= 0 ? '#10B981' : '#EF4444'} />
+          <Text style={[st.yuzdeMetin, { color: karZararYuzdesi >= 0 ? '#10B981' : '#EF4444' }]}>
+             {karZararYuzdesi >= 0 ? '+' : ''}{karZararYuzdesi.toFixed(2)}% Tüm Zamanlar
+          </Text>
+        </View>
+      </View>
 
-  // Anket Bölümü
-  anketKont: { paddingBottom: 10 },
-  ilerlemeKont: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
-  ilerlemeArka: { flex: 1, height: 4, backgroundColor: '#222', borderRadius: 2, marginRight: 16, overflow: 'hidden' },
-  ilerlemeOn: { height: 4, backgroundColor: '#D32F2F', borderRadius: 2 },
-  adimMetin: { fontSize: 12, color: '#666', fontWeight: '700', letterSpacing: 1 },
+      {/* ── Sekmeler ── */}
+      <View style={st.sekmeKonteyner}>
+        <TouchableOpacity 
+          style={[st.sekme, aktifSekme === 'Varlıklarım' && st.sekmeAktif]} 
+          onPress={() => setAktifSekme('Varlıklarım')}
+        >
+          <Text style={[st.sekmeMetni, aktifSekme === 'Varlıklarım' && st.sekmeMetniAktif]}>Varlıklarım</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[st.sekme, aktifSekme === 'Takip Listesi' && st.sekmeAktif]} 
+          onPress={() => setAktifSekme('Takip Listesi')}
+        >
+          <Text style={[st.sekmeMetni, aktifSekme === 'Takip Listesi' && st.sekmeMetniAktif]}>Takip Listesi</Text>
+        </TouchableOpacity>
+      </View>
 
-  soruKont: { marginBottom: 28, alignItems: 'center' },
-  soruIkonKutu: { width: 56, height: 56, borderRadius: 16, backgroundColor: '#200A0A', alignItems: 'center', justifyContent: 'center', marginBottom: 16, borderWidth: 1, borderColor: '#3A1010' },
-  soruBaslik: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', textAlign: 'center', marginBottom: 8, lineHeight: 30 },
-  soruAlt: { fontSize: 14, color: '#888', textAlign: 'center' },
+      {/* ── İçerik Listesi ── */}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.scrollIcerik}>
+        {yukleniyorDurumu ? (
+          <ActivityIndicator size="large" color="#10B981" style={{ marginTop: 40 }} />
+        ) : (
+          aktifSekme === 'Varlıklarım' ? renderPortfoy() : renderTakipListesi()
+        )}
+      </ScrollView>
 
-  seceneklerGrid: { gap: 12 },
-  secenekKutu: { backgroundColor: '#1A1A1A', borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#2A2A2A' },
-  secenekIkon: { marginRight: 16 },
-  secenekEtiket: { fontSize: 16, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 },
-  secenekAlt: { fontSize: 12, color: '#888' },
-  secenekOk: { marginLeft: 'auto', width: 28, height: 28, borderRadius: 14, backgroundColor: '#222', alignItems: 'center', justifyContent: 'center' },
+      {/* ── Yüzen Alarm Butonu ── */}
+      <TouchableOpacity style={st.fab} onPress={() => setModalGorunurlugu(true)}>
+        <MaterialIcons name="notifications-active" size={24} color="#FFF" />
+      </TouchableOpacity>
 
-  // Yükleniyor
-  yukleniyorKont: { alignItems: 'center', paddingVertical: 40 },
-  yukleniyorIkonDaire: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#200A0A', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#3A1010' },
-  yukleniyorBaslik: { fontSize: 20, fontWeight: '800', color: '#FFFFFF' },
-  yukleniyorAlt: { fontSize: 14, color: '#888', textAlign: 'center', lineHeight: 22, marginTop: 12, paddingHorizontal: 20 },
+      {/* ── Ekleme Modalı ── */}
+      <Modal visible={ekleModalGorunurlugu} transparent animationType="slide">
+        <View style={st.modalArka}>
+          <View style={st.modalKutu}>
+            <Text style={st.modalBaslik}>Varlık Ekle</Text>
+            
+            <TextInput style={st.input} placeholder="Varlık Kodu (Örn: AAPL)" placeholderTextColor="#6B7280" value={yeniKod} onChangeText={setYeniKod} />
+            <TextInput style={st.input} placeholder="Miktar" placeholderTextColor="#6B7280" keyboardType="numeric" value={yeniMiktar} onChangeText={setYeniMiktar} />
+            <TextInput style={st.input} placeholder="Alış Fiyatı" placeholderTextColor="#6B7280" keyboardType="numeric" value={yeniFiyat} onChangeText={setYeniFiyat} />
+            
+            <View style={st.modalButonSatir}>
+              <TouchableOpacity style={st.modalKapatBtn} onPress={() => setEkleModalGorunurlugu(false)}>
+                <Text style={st.modalKapatMetin}>İptal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={st.modalOnayBtn} onPress={() => {
+                if(yeniKod && yeniMiktar && yeniFiyat) {
+                  varlikEkle(yeniKod.toUpperCase(), parseFloat(yeniMiktar), parseFloat(yeniFiyat));
+                  setEkleModalGorunurlugu(false);
+                  setYeniKod(''); setYeniMiktar(''); setYeniFiyat('');
+                }
+              }}>
+                <Text style={st.modalOnayMetin}>Ekle</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
-  // Sonuç Bölümü
-  sonucKont: { paddingTop: 10 },
-  sonucHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16, justifyContent: 'center' },
-  profilBaslik: { fontSize: 14, fontWeight: '700', color: '#D32F2F', textTransform: 'uppercase', letterSpacing: 1 },
-  kullaniciProfili: { fontSize: 24, fontWeight: '900', color: '#FFFFFF', textAlign: 'center', marginBottom: 20, lineHeight: 32 },
+      {/* ── Alarm Kur Modalı (1.jpeg Referanslı) ── */}
+      <Modal visible={modalGorunurlugu} transparent animationType="slide">
+        <View style={st.modalArka}>
+          <View style={st.modalKutu}>
+            <View style={st.alarmBadge}>
+              <MaterialIcons name="timer" size={16} color="#EAB308" />
+              <Text style={st.alarmBadgeMetin}>Yeni Fiyat Alarmı</Text>
+            </View>
 
-  ozetKutu: { backgroundColor: '#1A1A1A', borderRadius: 12, padding: 16, borderWidth: 1, borderLeftWidth: 4, borderColor: '#2A2A2A', borderLeftColor: '#D32F2F', marginBottom: 24 },
-  ozetMetin: { fontSize: 14, color: '#CCC', lineHeight: 22 },
+            <Text style={st.modalBaslik}>Alarm Kur</Text>
+            
+            <TextInput style={st.input} placeholder="Varlık Kodu (Örn: ASELS)" placeholderTextColor="#6B7280" value={alarmKod} onChangeText={setAlarmKod} />
+            
+            <View style={st.yonSecici}>
+              {['+', '-', '+/-'].map(y => (
+                <TouchableOpacity 
+                  key={y} 
+                  style={[st.yonBtn, alarmYon === y && st.yonBtnAktif]}
+                  onPress={() => setAlarmYon(y)}
+                >
+                  <Text style={[st.yonBtnMetin, alarmYon === y && st.yonBtnMetinAktif]}>{y}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-  ayirici: { height: 1, backgroundColor: '#222', marginBottom: 24 },
+            <TextInput style={st.input} placeholder="Hedef Değer (Örn: 45.50)" placeholderTextColor="#6B7280" keyboardType="numeric" value={alarmDeger} onChangeText={setAlarmDeger} />
 
-  hisseBaslik: { fontSize: 18, fontWeight: '800', color: '#FFFFFF' },
-  hisseListesiKont: { gap: 16, marginBottom: 28 },
-  hisseKarti: { backgroundColor: '#1A1A1A', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#2A2A2A' },
-  hisseKod: { fontSize: 20, fontWeight: '900', color: '#FFFFFF', letterSpacing: 1 },
+            <TouchableOpacity style={st.altinButon} onPress={() => {
+              if (alarmKod && alarmDeger) {
+                alarmKur(alarmKod.toUpperCase(), alarmTip, alarmYon, parseFloat(alarmDeger));
+                setModalGorunurlugu(false);
+                setAlarmKod(''); setAlarmDeger('');
+              }
+            }}>
+              <Text style={st.altinButonMetin}>Oluştur</Text>
+            </TouchableOpacity>
 
-  riskBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1 },
-  riskBadgeMetin: { fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+            <TouchableOpacity style={st.iptalButon} onPress={() => setModalGorunurlugu(false)}>
+              <Text style={st.iptalButonMetin}>Vazgeç</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
-  cubukArka: { height: 6, backgroundColor: '#2A2A2A', borderRadius: 3, overflow: 'hidden' },
-  cubukOn: { height: 6, borderRadius: 3 },
+    </View>
+  );
+}
 
-  oneriKutu: { backgroundColor: '#141414', padding: 12, borderRadius: 8, marginTop: 12, borderWidth: 1, borderColor: '#222' },
-  oneriNedeni: { fontSize: 13, color: '#AAA', lineHeight: 20 },
+const st = StyleSheet.create({
+  anaGövde: { flex: 1, backgroundColor: '#0F1014' },
+  
+  header: { paddingTop: 60, paddingHorizontal: 24, paddingBottom: 24, alignItems: 'center' },
+  headerAltBaslik: { color: '#8A8B92', fontSize: 14, fontWeight: '500', marginBottom: 8 },
+  headerBakiye: { color: '#FFF', fontSize: 42, fontWeight: '800', letterSpacing: -1, marginBottom: 12 },
+  yuzdeRozet: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  yuzdeMetin: { fontSize: 14, fontWeight: '700', marginLeft: 4 },
 
-  sifirlaBtn: { backgroundColor: '#D32F2F', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 12, gap: 8, shadowColor: '#D32F2F', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6 },
-  sifirlaMetin: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
+  sekmeKonteyner: { flexDirection: 'row', marginHorizontal: 24, backgroundColor: '#1A1B22', borderRadius: 12, padding: 4, marginBottom: 16 },
+  sekme: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
+  sekmeAktif: { backgroundColor: '#2C2D35' },
+  sekmeMetni: { color: '#8A8B92', fontSize: 14, fontWeight: '600' },
+  sekmeMetniAktif: { color: '#FFF' },
+
+  scrollIcerik: { paddingHorizontal: 24, paddingBottom: 100 },
+  listeKonteyner: { marginTop: 8 },
+
+  ekleButonGeniş: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10B98115', padding: 14, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#10B98130', borderStyle: 'dashed' },
+  ekleButonMetin: { color: '#10B981', fontSize: 15, fontWeight: '700', marginLeft: 8 },
+
+  kart: { backgroundColor: '#1A1B22', borderRadius: 16, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', overflow: 'hidden' },
+  kartSol: { flexDirection: 'row', alignItems: 'center' },
+  ikonKutu: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#3B82F620', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  ikonHarf: { color: '#3B82F6', fontSize: 18, fontWeight: '700' },
+  kartBaslik: { color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  kartAlt: { color: '#8A8B92', fontSize: 13, fontWeight: '500' },
+  
+  kartSag: { alignItems: 'flex-end', marginRight: 32 },
+  kartDeger: { color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  kartFiyat: { fontSize: 13, fontWeight: '600' },
+  
+  fiyatBalon: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, marginRight: 32 },
+  balonMetin: { fontSize: 14, fontWeight: '700' },
+
+  silButon: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 44, backgroundColor: '#EF4444', justifyContent: 'center', alignItems: 'center' },
+
+  fab: { position: 'absolute', bottom: 24, right: 24, width: 60, height: 60, borderRadius: 30, backgroundColor: '#EAB308', justifyContent: 'center', alignItems: 'center', shadowColor: '#EAB308', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+
+  modalArka: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalKutu: { backgroundColor: '#1A1B22', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+  modalBaslik: { color: '#FFF', fontSize: 24, fontWeight: '800', marginBottom: 20 },
+  
+  input: { backgroundColor: '#0F1014', color: '#FFF', padding: 16, borderRadius: 12, fontSize: 16, marginBottom: 16, borderWidth: 1, borderColor: '#2C2D35' },
+  
+  modalButonSatir: { flexDirection: 'row', gap: 12 },
+  modalKapatBtn: { flex: 1, padding: 16, borderRadius: 12, backgroundColor: '#2C2D35', alignItems: 'center' },
+  modalKapatMetin: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  modalOnayBtn: { flex: 1, padding: 16, borderRadius: 12, backgroundColor: '#10B981', alignItems: 'center' },
+  modalOnayMetin: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+
+  alarmBadge: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', backgroundColor: '#EAB30820', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginBottom: 16 },
+  alarmBadgeMetin: { color: '#EAB308', fontSize: 13, fontWeight: '700', marginLeft: 6 },
+  
+  yonSecici: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  yonBtn: { flex: 1, padding: 12, borderRadius: 10, backgroundColor: '#0F1014', borderWidth: 1, borderColor: '#2C2D35', alignItems: 'center' },
+  yonBtnAktif: { backgroundColor: '#EAB30820', borderColor: '#EAB308' },
+  yonBtnMetin: { color: '#8A8B92', fontSize: 16, fontWeight: '700' },
+  yonBtnMetinAktif: { color: '#EAB308' },
+  
+  altinButon: { backgroundColor: '#EAB308', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 8 },
+  altinButonMetin: { color: '#0F1014', fontSize: 16, fontWeight: '800' },
+  iptalButon: { padding: 16, alignItems: 'center', marginTop: 8 },
+  iptalButonMetin: { color: '#8A8B92', fontSize: 15, fontWeight: '600' }
 });
-
-export default AnaSayfa;
